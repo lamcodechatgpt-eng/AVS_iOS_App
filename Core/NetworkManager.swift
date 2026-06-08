@@ -15,15 +15,21 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         super.init()
         DispatchQueue.main.async {
             let config = WKWebViewConfiguration()
-            self.webView = WKWebView(frame: .zero, configuration: config)
+            self.webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 375, height: 812), configuration: config)
             self.webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
             self.webView.navigationDelegate = self
+            self.webView.alpha = 0.01 // Giấu đi nhưng vẫn cho phép render
         }
     }
     
     // Tải HTML thông qua WKWebView để tự động bypass Cloudflare/Bot-check
     func fetchHTML(url: String, completion: @escaping (String) -> Void) {
         DispatchQueue.main.async {
+            // Phải add vào view hierarchy thì WKWebView mới chạy thực tế trên iOS
+            if self.webView.superview == nil, let window = UIApplication.shared.windows.first {
+                window.addSubview(self.webView)
+            }
+            
             self.completionQueue.append(completion)
             if let targetUrl = URL(string: url) {
                 let req = URLRequest(url: targetUrl)
@@ -38,15 +44,20 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             self.resolvedDomain = "https://" + host
         }
         
-        // Đợi thêm 1s để JS render xong nếu có Cloudflare
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        // Đợi thêm 1.5s để đảm bảo Cloudflare challenge chạy xong
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             webView.evaluateJavaScript("document.documentElement.outerHTML") { [weak self] result, _ in
                 let html = (result as? String) ?? ""
                 guard let self = self else { return }
-                for completion in self.completionQueue {
-                    completion(html)
+                
+                // Nếu HTML quá ngắn, có thể đang bị dính trang redirect JS chưa qua được
+                if html.count > 1000 {
+                    let queue = self.completionQueue
+                    self.completionQueue.removeAll()
+                    for completion in queue {
+                        completion(html)
+                    }
                 }
-                self.completionQueue.removeAll()
             }
         }
     }
