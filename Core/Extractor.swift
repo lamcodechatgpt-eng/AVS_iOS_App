@@ -37,7 +37,7 @@ class Extractor {
     private static func extractFromIframe(iframeUrl: String, completion: @escaping (URL?) -> Void) {
         guard let url = URL(string: iframeUrl) else { return completion(nil) }
         var req = URLRequest(url: url)
-        req.setValue(NetworkManager.shared.baseUrl, forHTTPHeaderField: "Referer")
+        req.setValue(NetworkManager.shared.resolvedDomain, forHTTPHeaderField: "Referer")
         
         URLSession.shared.dataTask(with: req) { data, _, _ in
             guard let html = String(data: data ?? Data(), encoding: .utf8) else { return completion(nil) }

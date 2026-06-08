@@ -3,7 +3,10 @@ import WebKit
 
 class NetworkManager: NSObject, WKNavigationDelegate {
     static let shared = NetworkManager()
-    var baseUrl = "https://animevietsub.id"
+    
+    // Dùng link rút gọn gốc để auto redirect về domain sống mới nhất (chống die tên miền)
+    var baseUrl = "https://bit.ly/animevietsubtv"
+    var resolvedDomain = "https://animevietsub.by" // Fallback
     
     private var webView: WKWebView!
     private var completionQueue: [(String) -> Void] = []
@@ -30,6 +33,11 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
     
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Cập nhật tên miền thực tế sau khi đã qua lớp redirect 301
+        if let host = webView.url?.host {
+            self.resolvedDomain = "https://" + host
+        }
+        
         // Đợi thêm 1s để JS render xong nếu có Cloudflare
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             webView.evaluateJavaScript("document.documentElement.outerHTML") { [weak self] result, _ in
@@ -63,7 +71,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                         let title = String(html[titleRange])
                         
                         movies.append(Movie(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                                            link: link.hasPrefix("http") ? link : NetworkManager.shared.baseUrl + link,
+                                            link: link.hasPrefix("http") ? link : NetworkManager.shared.resolvedDomain + link,
                                             thumbUrl: thumbUrl,
                                             episodeStatus: epsRaw.trimmingCharacters(in: .whitespacesAndNewlines)))
                     }
@@ -88,7 +96,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                         let title = String(html[titleRange]).replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression, range: nil)
                         
                         episodes.append(Episode(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                link: link.hasPrefix("http") ? link : NetworkManager.shared.baseUrl + link,
+                                                link: link.hasPrefix("http") ? link : NetworkManager.shared.resolvedDomain + link,
                                                 episodeId: nil))
                     }
                 }
