@@ -4,12 +4,8 @@ class Extractor {
     
     // 1. Lấy link iframe hoặc direct link từ trang xem-phim.html
     static func resolveStream(episodeUrl: String, completion: @escaping (URL?) -> Void) {
-        guard let url = URL(string: episodeUrl) else { return completion(nil) }
-        var req = URLRequest(url: url)
-        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
-        
-        URLSession.shared.dataTask(with: req) { data, _, _ in
-            guard let html = String(data: data ?? Data(), encoding: .utf8) else { return completion(nil) }
+        // Dùng fetchHTML của NetworkManager (WKWebView) để bypass Cloudflare 403
+        NetworkManager.shared.fetchHTML(url: episodeUrl) { html in
             
             // Tìm object PLAYER_DATA chứa thông tin luồng
             let pattern = "window\\.PLAYER_DATA\\s*=\\s*(\\{.*?\\});"
@@ -34,7 +30,7 @@ class Extractor {
                 // Nếu là direct mp4 hoặc m3u8
                 completion(URL(string: link))
             }
-        }.resume()
+        })
     }
     
     // 2. Chui vào iframe bên thứ 3 để bóc link m3u8 cuối cùng
@@ -53,7 +49,6 @@ class Extractor {
                let range = Range(match.range(at: 1), in: html) {
                 completion(URL(string: String(html[range])))
             } else {
-                // Log để debug nếu thuật toán obfuscate của iframe đổi
                 print("Không tìm thấy m3u8 trong iframe: \(iframeUrl)")
                 completion(nil)
             }
