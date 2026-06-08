@@ -30,7 +30,7 @@ class Extractor {
                 // Nếu là direct mp4 hoặc m3u8
                 completion(URL(string: link))
             }
-        })
+        }
     }
     
     // 2. Chui vào iframe bên thứ 3 để bóc link m3u8 cuối cùng
