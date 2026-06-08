@@ -1,0 +1,33 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build unsigned IPA
+        run: |
+          xcodebuild clean archive -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -archivePath AVS_iOS_App.xcarchive CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO
+          mkdir -p Payload
+          cp -r AVS_iOS_App.xcarchive/Products/Applications/AVS_iOS_App.app Payload/
+          zip -r AVS_iOS_App.ipa Payload
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AVS_iOS_App-IPA
+          path: AVS_iOS_App.ipa

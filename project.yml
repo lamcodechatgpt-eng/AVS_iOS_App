@@ -1,0 +1,15 @@
+name: AVS_iOS_App
+options:
+  bundleIdPrefix: com.animevietsub
+targets:
+  AVS_iOS_App:
+    type: application
+    platform: iOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Core
+      - path: UI
+      - path: AppDelegate.swift
+      - path: SceneDelegate.swift
+    info:
+      path: Info.plist
