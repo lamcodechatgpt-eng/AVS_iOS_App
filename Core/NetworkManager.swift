@@ -44,19 +44,33 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             self.resolvedDomain = "https://" + host
         }
         
-        // Đợi thêm 1.5s để đảm bảo Cloudflare challenge chạy xong
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        checkDOM(webView: webView, retries: 15)
+    }
+    
+    private func checkDOM(webView: WKWebView, retries: Int) {
+        if retries <= 0 {
+            let queue = self.completionQueue
+            self.completionQueue.removeAll()
+            for completion in queue {
+                completion("")
+            }
+            return
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             webView.evaluateJavaScript("document.documentElement.outerHTML") { [weak self] result, _ in
                 let html = (result as? String) ?? ""
                 guard let self = self else { return }
                 
-                // Nếu HTML quá ngắn, có thể đang bị dính trang redirect JS chưa qua được
-                if html.count > 1000 {
+                // Chờ tới khi trang chủ load xong AJAX (hiện TPostMv) hoặc trang chi tiết load tập phim (-tap-)
+                if html.contains("TPostMv") || html.contains("mli-eps") || html.contains("-tap-") {
                     let queue = self.completionQueue
                     self.completionQueue.removeAll()
                     for completion in queue {
                         completion(html)
                     }
+                } else {
+                    self.checkDOM(webView: webView, retries: retries - 1)
                 }
             }
         }
