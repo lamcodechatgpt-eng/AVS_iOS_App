@@ -35,13 +35,8 @@ class Extractor {
     
     // 2. Chui vào iframe bên thứ 3 để bóc link m3u8 cuối cùng
     private static func extractFromIframe(iframeUrl: String, completion: @escaping (URL?) -> Void) {
-        guard let url = URL(string: iframeUrl) else { return completion(nil) }
-        var req = URLRequest(url: url)
-        req.setValue(NetworkManager.shared.resolvedDomain, forHTTPHeaderField: "Referer")
-        
-        URLSession.shared.dataTask(with: req) { data, _, _ in
-            guard let html = String(data: data ?? Data(), encoding: .utf8) else { return completion(nil) }
-            
+        // Trỏ NetworkManager fetch iframe URL thông qua WKWebView để bypass Cloudflare Bot Detection trên CDN
+        NetworkManager.shared.fetchHTML(url: iframeUrl) { html in
             // Tìm file m3u8 trong source của iframe
             let pattern = "(?i)file\\s*:\\s*[\"'](https?://.*?\\.m3u8.*?)[\"']"
             if let regex = try? NSRegularExpression(pattern: pattern),
@@ -52,6 +47,6 @@ class Extractor {
                 print("Không tìm thấy m3u8 trong iframe: \(iframeUrl)")
                 completion(nil)
             }
-        }.resume()
+        }
     }
 }

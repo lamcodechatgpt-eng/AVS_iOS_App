@@ -18,7 +18,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             self.webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 375, height: 812), configuration: config)
             self.webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
             self.webView.navigationDelegate = self
-            self.webView.alpha = 0.01 // Giấu đi nhưng vẫn cho phép render
+            self.webView.isHidden = true // Giấu đi nhưng vẫn nằm trong view hierarchy, thay vì dùng alpha=0.01 gây throttling JS
         }
     }
     
@@ -27,7 +27,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         DispatchQueue.main.async {
             // Phải add vào view hierarchy thì WKWebView mới chạy thực tế trên iOS
             if self.webView.superview == nil, let window = UIApplication.shared.windows.first {
-                window.addSubview(self.webView)
+                window.insertSubview(self.webView, at: 0) // Nằm dưới cùng
             }
             
             self.completionQueue.append(completion)
@@ -62,8 +62,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 let html = (result as? String) ?? ""
                 guard let self = self else { return }
                 
-                // Chờ tới khi trang chủ load xong AJAX (hiện TPostMv) hoặc trang chi tiết load tập phim (-tap-)
-                if html.contains("TPostMv") || html.contains("mli-eps") || html.contains("-tap-") {
+                // Chờ tới khi trang chủ load xong AJAX (hiện TPostMv) hoặc trang chi tiết load tập phim (-tap-) hoặc iframe load xong (.m3u8)
+                if html.contains("TPostMv") || html.contains("mli-eps") || html.contains("-tap-") || html.contains(".m3u8") {
                     let queue = self.completionQueue
                     self.completionQueue.removeAll()
                     for completion in queue {
