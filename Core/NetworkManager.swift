@@ -4,9 +4,21 @@ import WebKit
 class NetworkManager: NSObject, WKNavigationDelegate {
     static let shared = NetworkManager()
     
-    // Dùng link rút gọn gốc để auto redirect về domain sống mới nhất (chống die tên miền)
-    var baseUrl = "https://bit.ly/animevietsubtv"
-    var resolvedDomain = "https://animevietsub.by" // Fallback
+    // Link gốc bất tử (bit.ly) dùng để dự phòng khi domain chết
+    let backupUrl = "https://bit.ly/animevietsubtv"
+    
+    // Domain hiện tại, tự động lưu vào máy để các lần mở app sau load cực nhanh không cần qua bit.ly
+    var resolvedDomain: String {
+        get {
+            return UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") ?? "https://animevietsub.by"
+        }
+        set {
+            if newValue != resolvedDomain && newValue.hasPrefix("http") {
+                UserDefaults.standard.set(newValue, forKey: "AVS_ResolvedDomain")
+                print("Đã cập nhật domain mới: \\(newValue)")
+            }
+        }
+    }
     
     private var webView: WKWebView!
     private var completionQueue: [(String) -> Void] = []
@@ -120,33 +132,46 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
     
     func fetchHomeMovies(completion: @escaping ([Movie]) -> Void) {
-        fetchHTML(url: baseUrl) { html in
-            var movies: [Movie] = []
-            let pattern = "<article id=\"post-[\\s\\S]*?<a href=\"([^\"]+)\"[\\s\\S]*?<img[\\s\\S]*?src=\"([^\"]+)\"[\\s\\S]*?<span class=\"mli-eps\">(.*?)</span>[\\s\\S]*?<h2 class=\"Title\">([^<]+)</h2>"
-            
-            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
-                let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
-                for match in matches {
-                    if let linkRange = Range(match.range(at: 1), in: html),
-                       let imgRange = Range(match.range(at: 2), in: html),
-                       let epsRange = Range(match.range(at: 3), in: html),
-                       let titleRange = Range(match.range(at: 4), in: html) {
-                        
-                        let link = String(html[linkRange])
-                        let thumbUrl = String(html[imgRange])
-                        let epsRaw = String(html[epsRange])
-                            .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression, range: nil)
-                        let title = String(html[titleRange])
-                        
-                        movies.append(Movie(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                                            link: link.hasPrefix("http") ? link : NetworkManager.shared.resolvedDomain + link,
-                                            thumbUrl: thumbUrl,
-                                            episodeStatus: epsRaw.trimmingCharacters(in: .whitespacesAndNewlines)))
-                    }
+        // Ưu tiên dùng domain đã lưu (nhanh hơn)
+        fetchHTML(url: resolvedDomain) { html in
+            if html.isEmpty {
+                // Nếu domain cũ đã chết, tự động dùng bit.ly để tìm domain mới
+                print("Domain cũ không phản hồi, đang dùng backup link...")
+                self.fetchHTML(url: self.backupUrl) { newHtml in
+                    self.parseMovies(html: newHtml, completion: completion)
+                }
+            } else {
+                self.parseMovies(html: html, completion: completion)
+            }
+        }
+    }
+    
+    private func parseMovies(html: String, completion: @escaping ([Movie]) -> Void) {
+        var movies: [Movie] = []
+        let pattern = "<article id=\"post-[\\s\\S]*?<a href=\"([^\"]+)\"[\\s\\S]*?<img[\\s\\S]*?src=\"([^\"]+)\"[\\s\\S]*?<span class=\"mli-eps\">(.*?)</span>[\\s\\S]*?<h2 class=\"Title\">([^<]+)</h2>"
+        
+        if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+            let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+            for match in matches {
+                if let linkRange = Range(match.range(at: 1), in: html),
+                   let imgRange = Range(match.range(at: 2), in: html),
+                   let epsRange = Range(match.range(at: 3), in: html),
+                   let titleRange = Range(match.range(at: 4), in: html) {
+                    
+                    let link = String(html[linkRange])
+                    let thumbUrl = String(html[imgRange])
+                    let epsRaw = String(html[epsRange])
+                        .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression, range: nil)
+                    let title = String(html[titleRange])
+                    
+                    movies.append(Movie(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                                        link: link.hasPrefix("http") ? link : NetworkManager.shared.resolvedDomain + link,
+                                        thumbUrl: thumbUrl,
+                                        episodeStatus: epsRaw.trimmingCharacters(in: .whitespacesAndNewlines)))
                 }
             }
-            completion(movies)
         }
+        completion(movies)
     }
     
     func fetchEpisodes(movieUrl: String, completion: @escaping ([Episode]) -> Void) {
