@@ -117,8 +117,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 let html = (result as? String) ?? ""
                 guard let self = self else { return }
                 
-                // Chờ tới khi trang chủ load xong AJAX (hiện TPostMv) hoặc trang chi tiết load tập phim (-tap-) hoặc iframe load xong (.m3u8)
-                if html.contains("TPostMv") || html.contains("mli-eps") || html.contains("-tap-") || html.contains(".m3u8") {
+                // Chờ tới khi trang chủ load xong AJAX (hiện TPostMv) hoặc trang chi tiết load tập phim (tap-) hoặc iframe load xong (.m3u8)
+                if html.contains("TPostMv") || html.contains("mli-eps") || html.contains("tap-") || html.contains("PLAYER_DATA") || html.contains(".m3u8") {
                     let queue = self.completionQueue
                     self.completionQueue.removeAll()
                     for completion in queue {
@@ -177,7 +177,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     func fetchEpisodes(movieUrl: String, completion: @escaping ([Episode]) -> Void) {
         fetchHTML(url: movieUrl) { html in
             var episodes: [Episode] = []
-            let pattern = "<a[^>]+href=\"([^\"]+-tap-[^\"]+\\.html)\"[^>]*>(.*?)</a>"
+            let pattern = "<a[^>]+href=\"([^\"]+tap-[^\"]+\\.html)\"[^>]*>(.*?)</a>"
             
             if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
                 let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
