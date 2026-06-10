@@ -19,7 +19,7 @@ class PlayerController: UIViewController {
                 self.activityIndicator.stopAnimating()
 
                 guard let m3u8 = m3u8 else {
-                    self.statusLabel.text = "Không lấy được luồng phim.\nServer có thể đang chặn hoặc đổi link.\nThử lại sau ít phút."
+                    self.statusLabel.text = "Không lấy được luồng phim.\nWeb mở được nhưng app chưa bắt được link luồng.\nXem log [Extractor] trong Console để biết HTML server trả về gì."
                     print("[PlayerController] resolveStream trả về nil cho \(self.episodeUrl ?? "")")
                     return
                 }

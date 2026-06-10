@@ -60,6 +60,14 @@ class Extractor {
             }
 
             print("[Extractor] Không tìm thấy PLAYER_DATA hay link luồng trong HTML (\(html.count) ký tự).")
+            // Trích vài ký tự quanh các từ khoá quen thuộc để dễ debug khi server đổi format.
+            for keyword in ["PLAYER_DATA", "playTech", "data-id", "halim-btn", "googleapiscdn", "m3u8", "iframe"] {
+                if let range = html.range(of: keyword) {
+                    let start = html.index(range.lowerBound, offsetBy: -50, limitedBy: html.startIndex) ?? html.startIndex
+                    let end = html.index(range.upperBound, offsetBy: 200, limitedBy: html.endIndex) ?? html.endIndex
+                    print("[Extractor]   '\(keyword)' xuất hiện: ...\(html[start..<end])...")
+                }
+            }
             completion(nil)
         }
     }

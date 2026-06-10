@@ -76,6 +76,38 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 document.addEventListener("DOMContentLoaded", function() {
                     observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
                 });
+
+                // Auto-click play trên trang xem-phim: AnimeVietsub chỉ fetch luồng .m3u8
+                // SAU KHI user bấm nút "Xem phim" hoặc một tập. Headless WKWebView không
+                // có ai bấm nên link không bao giờ được sinh ra. Tự bấm thay user.
+                var autoPlayTries = 0;
+                var autoPlay = function() {
+                    autoPlayTries++;
+                    if (autoPlayTries > 30) return; // ~15s
+                    var path = window.location.pathname || '';
+                    var looksLikeWatch = path.indexOf('xem-phim') !== -1
+                        || path.indexOf('-tap-') !== -1
+                        || path.indexOf('/tap-') !== -1
+                        || (document.documentElement.outerHTML || '').indexOf('PLAYER_DATA') !== -1;
+                    if (!looksLikeWatch) { setTimeout(autoPlay, 500); return; }
+
+                    // Ưu tiên tập đang xem (halim-watching), kế đến mọi nút play/episode
+                    var candidates = document.querySelectorAll(
+                        '.halim-watching, a.halim-watching, .episode-active, .play-button, '
+                        + '.video-play-button, .btn-play, #btn-watch, .watch-button, '
+                        + '.halim-btn.halim-btn-2, .episode-link, .list-episode a, '
+                        + '.halim-list-eps a'
+                    );
+                    var clicked = false;
+                    for (var i = 0; i < candidates.length && !clicked; i++) {
+                        try { candidates[i].click(); clicked = true; } catch (e) {}
+                    }
+                    var video = document.querySelector('video');
+                    if (video) { try { video.play(); } catch (e) {} }
+                    if (!clicked) setTimeout(autoPlay, 500);
+                };
+                document.addEventListener("DOMContentLoaded", function() { setTimeout(autoPlay, 800); });
+                if (document.readyState !== 'loading') setTimeout(autoPlay, 800);
             })();
             """
             let script = WKUserScript(source: jsHook, injectionTime: .atDocumentStart, forMainFrameOnly: false)
@@ -84,7 +116,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             
             // Đặt ngoài màn hình để không bị iOS đình chỉ render (throttle JS của Cloudflare)
             self.webView = WKWebView(frame: CGRect(x: -3000, y: -3000, width: 375, height: 812), configuration: config)
-            self.webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
+            self.webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
             self.webView.navigationDelegate = self
             self.webView.isHidden = false
             self.webView.alpha = 1.0
@@ -110,7 +142,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 req.setValue(self.resolvedDomain + "/", forHTTPHeaderField: "Referer")
                 self.webView.load(req)
                 // Khởi động vòng lặp kiểm tra DOM ngay lập tức
-                self.checkDOM(webView: self.webView, loadId: loadId, retries: 25, waitForIframe: waitForIframe) // Tăng thời gian chờ lên 25s cho mạng chậm
+                self.checkDOM(webView: self.webView, loadId: loadId, retries: 40, waitForIframe: waitForIframe) // 40s: auto-click cần thêm thời gian để AJAX trả luồng
             }
         }
     }
