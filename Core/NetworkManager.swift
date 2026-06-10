@@ -357,6 +357,103 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 self.resolvedDomain = "https://" + host
             }
         }
+        // Sync cookies WKWebView → URLSession (HTTPCookieStorage.shared) để URLSession
+        // dùng được cookie CF clearance + session AVS đã tích.
+        syncCookiesToURLSession()
+    }
+
+    private func syncCookiesToURLSession() {
+        webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+            for c in cookies {
+                HTTPCookieStorage.shared.setCookie(c)
+            }
+        }
+    }
+
+    /// Live search suggestion qua AJAX endpoint `/ajax/suggest`.
+    /// Trả tối đa 5-6 phim trong < 500ms (URLSession trực tiếp, không qua WebView).
+    func fetchSearchSuggestions(keyword: String, completion: @escaping ([Movie]) -> Void) {
+        let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { completion([]); return }
+        let url = URL(string: "\(resolvedDomain)/ajax/suggest")!
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 6
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+        req.setValue("\(resolvedDomain)/", forHTTPHeaderField: "Referer")
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+                     forHTTPHeaderField: "User-Agent")
+
+        // Form encoding: dấu cách = '+', còn lại percent-encode. AVS dùng form key
+        // `ajaxSearch=1&keysearch=<từ khoá>`.
+        let encoded = trimmed
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)?
+            .replacingOccurrences(of: "%20", with: "+") ?? trimmed
+        let body = "ajaxSearch=1&keysearch=\(encoded)"
+        req.httpBody = body.data(using: .utf8)
+
+        URLSession.shared.dataTask(with: req) { data, resp, err in
+            if let err = err {
+                Logger.shared.log("[Suggest] LỖI: \(err.localizedDescription)")
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            if let http = resp as? HTTPURLResponse, http.statusCode != 200 {
+                Logger.shared.log("[Suggest] HTTP \(http.statusCode) cho '\(trimmed)'")
+            }
+            let html = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let movies = Self.parseSuggestions(html: html)
+            Logger.shared.log("[Suggest] '\(trimmed)' → \(movies.count) gợi ý")
+            DispatchQueue.main.async { completion(movies) }
+        }.resume()
+    }
+
+    /// Parse 1 trong <li> của response AJAX suggest:
+    /// <li>
+    ///   <a style="background-image: url('POSTER')" href="LINK"></a>
+    ///   <div class="ss-info">
+    ///     <a class="ss-title" href="...">TITLE</a>
+    ///     <p>EPISODE STATUS</p>
+    ///   </div>
+    /// </li>
+    private static func parseSuggestions(html: String) -> [Movie] {
+        var result: [Movie] = []
+        var seen = Set<String>()
+        let liPattern = "<li[^>]*>([\\s\\S]*?)</li>"
+        guard let liRegex = try? NSRegularExpression(pattern: liPattern, options: .caseInsensitive) else { return [] }
+        let lis = liRegex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        for m in lis {
+            guard let r = Range(m.range(at: 1), in: html) else { continue }
+            let inner = String(html[r])
+            // Skip footer "Enter để tìm kiếm"
+            if inner.contains("suggest-all") || inner.contains("ss-bottom") { continue }
+
+            let poster = firstMatch(in: inner, pattern: "background-image:\\s*url\\(['\"]?([^'\"\\)]+)['\"]?\\)")
+            let link = firstMatch(in: inner, pattern: "<a[^>]+href=\"([^\"]+)\"[^>]*class=\"thumb\"")
+                ?? firstMatch(in: inner, pattern: "<a[^>]+class=\"thumb\"[^>]*href=\"([^\"]+)\"")
+                ?? firstMatch(in: inner, pattern: "<a[^>]+class=\"ss-title\"[^>]*href=\"([^\"]+)\"")
+                ?? firstMatch(in: inner, pattern: "href=\"([^\"]*?/phim/[^\"]+)\"")
+            let title = firstMatch(in: inner, pattern: "<a[^>]+class=\"ss-title\"[^>]*>([^<]+)</a>")
+            let status = firstMatch(in: inner, pattern: "<p>([^<]+)</p>")
+
+            guard let link = link, let title = title, !seen.contains(link) else { continue }
+            seen.insert(link)
+            result.append(Movie(
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                link: link,
+                thumbUrl: poster ?? "",
+                episodeStatus: (status ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            ))
+        }
+        return result
+    }
+
+    private static func firstMatch(in html: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else { return nil }
+        guard let m = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+              let r = Range(m.range(at: 1), in: html) else { return nil }
+        return String(html[r])
     }
     
     private func checkDOM(webView: WKWebView, loadId: Int, retries: Int, waitForIframe: Bool) {
@@ -498,14 +595,54 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             Logger.shared.log("[fetchHomeMovies] CACHE HIT (\(cached.count) phim) — trả ngay + refresh nền")
             completion(cached)
             // Refresh ngầm để cập nhật cho lần load sau, không update UI.
-            tryHomeFromDomains([resolvedDomain] + knownDomains.filter { $0 != resolvedDomain }) { fresh in
+            fetchHomePlusLatest { fresh in
                 if !fresh.isEmpty { DiskCache.shared.set(fresh, forKey: "home") }
             }
             return
         }
-        tryHomeFromDomains([resolvedDomain] + knownDomains.filter { $0 != resolvedDomain }) { movies in
+        fetchHomePlusLatest { movies in
             if !movies.isEmpty { DiskCache.shared.set(movies, forKey: "home") }
             completion(movies)
+        }
+    }
+
+    /// Fetch home page + /phim-moi/ trang 1+2 song song, dedupe → trả 1 list lớn (~60 phim).
+    private func fetchHomePlusLatest(completion: @escaping ([Movie]) -> Void) {
+        let group = DispatchGroup()
+        var homeMovies: [Movie] = []
+        var page1Movies: [Movie] = []
+        var page2Movies: [Movie] = []
+
+        group.enter()
+        tryHomeFromDomains([resolvedDomain] + knownDomains.filter { $0 != resolvedDomain }) { movies in
+            homeMovies = movies
+            group.leave()
+        }
+
+        group.enter()
+        fetchHTML(url: "\(resolvedDomain)/phim-moi/page/1/") { html in
+            self.parseMovies(html: html) { m in
+                page1Movies = m
+                group.leave()
+            }
+        }
+
+        group.enter()
+        fetchHTML(url: "\(resolvedDomain)/phim-moi/page/2/") { html in
+            self.parseMovies(html: html) { m in
+                page2Movies = m
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) {
+            var seen = Set<String>()
+            var combined: [Movie] = []
+            for m in homeMovies + page1Movies + page2Movies where seen.insert(m.link).inserted {
+                combined.append(m)
+            }
+            Logger.shared.log("[Home] home=\(homeMovies.count) + page1=\(page1Movies.count) + page2=\(page2Movies.count) → \(combined.count) phim sau dedupe")
+            completion(combined)
         }
     }
 
@@ -538,12 +675,14 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             matchedPattern = "fallback"
         }
         if movies.isEmpty {
-            // Cuối cùng: bắt mọi anchor <a href="...phim/..."> có ảnh + tiêu đề bên trong.
-            // Trang search/filter của AVS dùng layout khác — pattern lỏng nhất.
             movies = appendMoviesLoose(from: html)
             matchedPattern = "loose"
         }
-        Logger.shared.log("[parseMovies] \(matchedPattern) → \(movies.count) phim (html=\(html.count) ký tự)")
+        // Dedupe theo link — home AVS đôi khi chèn phim vào nhiều block (Hot, Mới cập nhật...)
+        // dẫn tới trùng. Giữ thứ tự xuất hiện đầu tiên.
+        var seen = Set<String>()
+        movies = movies.filter { seen.insert($0.link).inserted }
+        Logger.shared.log("[parseMovies] \(matchedPattern) → \(movies.count) phim (sau dedupe), html=\(html.count) ký tự")
         completion(movies)
     }
 

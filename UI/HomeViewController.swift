@@ -1,10 +1,14 @@
 import UIKit
 
-class HomeViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UISearchBarDelegate {
-    
+class HomeViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UISearchBarDelegate, UISearchResultsUpdating {
+
     var collectionView: UICollectionView!
     var movies: [Movie] = []
     let activityIndicator = UIActivityIndicatorView(style: .large)
+
+    // Live search
+    private let suggestionsVC = SearchSuggestionsViewController()
+    private var suggestSearchWork: DispatchWorkItem?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -106,13 +110,40 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
     }
     
     private func setupSearchBar() {
-        let searchController = UISearchController(searchResultsController: nil)
+        suggestionsVC.onSelect = { [weak self] movie in
+            guard let self = self else { return }
+            self.navigationItem.searchController?.isActive = false
+            let infoVC = MovieInfoViewController()
+            infoVC.movie = movie
+            self.navigationController?.pushViewController(infoVC, animated: true)
+        }
+        let searchController = UISearchController(searchResultsController: suggestionsVC)
         searchController.searchBar.delegate = self
+        searchController.searchResultsUpdater = self
         searchController.obscuresBackgroundDuringPresentation = false
         searchController.searchBar.placeholder = "Tìm kiếm Anime..."
+        searchController.searchBar.autocapitalizationType = .none
         navigationItem.searchController = searchController
         navigationItem.hidesSearchBarWhenScrolling = false
         definesPresentationContext = true
+    }
+
+    // Gõ chữ nào hiện gợi ý tương ứng — debounce 300ms.
+    func updateSearchResults(for searchController: UISearchController) {
+        let text = (searchController.searchBar.text ?? "").trimmingCharacters(in: .whitespaces)
+        suggestSearchWork?.cancel()
+        guard !text.isEmpty else {
+            suggestionsVC.update(movies: [], query: text, loading: false)
+            return
+        }
+        suggestionsVC.update(movies: suggestionsVC.movies, query: text, loading: true)
+        let work = DispatchWorkItem { [weak self] in
+            NetworkManager.shared.fetchSearchSuggestions(keyword: text) { results in
+                self?.suggestionsVC.update(movies: results, query: text, loading: false)
+            }
+        }
+        suggestSearchWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
     
     private func setupLoadingIndicator() {
@@ -133,10 +164,12 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
         let sideInset: CGFloat = 12
         let totalSpacing = sideInset * 2 + interItem * (columns - 1)
         let cellWidth = (view.bounds.width - totalSpacing) / columns
-        layout.itemSize = CGSize(width: cellWidth, height: cellWidth * 1.5)
+        // Tăng chiều cao 1.6 (thay 1.5) để text có chỗ rộng + thấy luôn ribbon ep.
+        layout.itemSize = CGSize(width: cellWidth, height: cellWidth * 1.6)
         layout.minimumLineSpacing = interItem
         layout.minimumInteritemSpacing = interItem
-        layout.sectionInset = UIEdgeInsets(top: 12, left: sideInset, bottom: 12, right: sideInset)
+        layout.sectionInset = UIEdgeInsets(top: 4, left: sideInset, bottom: 24, right: sideInset)
+        layout.headerReferenceSize = CGSize(width: view.bounds.width, height: 48)
 
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -145,6 +178,9 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
         collectionView.delegate = self
         collectionView.alwaysBounceVertical = true
         collectionView.register(MovieCell.self, forCellWithReuseIdentifier: "MovieCell")
+        collectionView.register(SectionHeaderView.self,
+                                forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
+                                withReuseIdentifier: "Header")
 
         // Pull to refresh
         let refresh = UIRefreshControl()
@@ -159,6 +195,13 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
         // Xoá cache home để fetch lại.
         DiskCache.shared.remove("home")
         fetchData()
+    }
+
+    // Section header với title
+    func collectionView(_ cv: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
+        let h = cv.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "Header", for: indexPath) as! SectionHeaderView
+        h.titleLabel.text = movies.isEmpty ? "Đang tải..." : "🔥 Mới cập nhật (\(movies.count) phim)"
+        return h
     }
     
     private func fetchData() {
@@ -332,4 +375,24 @@ class MovieCell: UICollectionViewCell {
             currentImageTask = ImageLoader.shared.load(url, into: imageView)
         }
     }
+}
+
+// MARK: - Section header
+
+final class SectionHeaderView: UICollectionReusableView {
+    let titleLabel = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        titleLabel.font = .systemFont(ofSize: 17, weight: .bold)
+        titleLabel.textColor = .label
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleLabel)
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
 }
