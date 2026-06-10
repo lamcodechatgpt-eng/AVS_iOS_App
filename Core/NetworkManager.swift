@@ -10,15 +10,18 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     
     private var webView: WKWebView!
     private var completionQueue: [(String) -> Void] = []
+    private var currentLoadId: Int = 0
     
     override init() {
         super.init()
         DispatchQueue.main.async {
             let config = WKWebViewConfiguration()
-            self.webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 375, height: 812), configuration: config)
+            // Đặt ngoài màn hình để không bị iOS đình chỉ render (throttle JS của Cloudflare)
+            self.webView = WKWebView(frame: CGRect(x: -3000, y: -3000, width: 375, height: 812), configuration: config)
             self.webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
             self.webView.navigationDelegate = self
-            self.webView.isHidden = true // Giấu đi nhưng vẫn nằm trong view hierarchy, thay vì dùng alpha=0.01 gây throttling JS
+            self.webView.isHidden = false
+            self.webView.alpha = 1.0
         }
     }
     
@@ -27,27 +30,34 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         DispatchQueue.main.async {
             // Phải add vào view hierarchy thì WKWebView mới chạy thực tế trên iOS
             if self.webView.superview == nil, let window = UIApplication.shared.windows.first {
-                window.insertSubview(self.webView, at: 0) // Nằm dưới cùng
+                window.addSubview(self.webView) 
             }
             
+            self.currentLoadId += 1
+            let loadId = self.currentLoadId
+            
+            self.completionQueue.removeAll() // Hủy các request cũ đang bị kẹt
             self.completionQueue.append(completion)
+            
             if let targetUrl = URL(string: url) {
                 let req = URLRequest(url: targetUrl)
                 self.webView.load(req)
+                // Khởi động vòng lặp kiểm tra DOM ngay lập tức
+                self.checkDOM(webView: self.webView, loadId: loadId, retries: 25) // Tăng thời gian chờ lên 25s cho mạng chậm
             }
         }
     }
     
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Cập nhật tên miền thực tế sau khi đã qua lớp redirect 301
         if let host = webView.url?.host {
             self.resolvedDomain = "https://" + host
         }
-        
-        checkDOM(webView: webView, retries: 15)
     }
     
-    private func checkDOM(webView: WKWebView, retries: Int) {
+    private func checkDOM(webView: WKWebView, loadId: Int, retries: Int) {
+        // Nếu đã có request mới đè lên, hủy vòng lặp này
+        if loadId != self.currentLoadId { return }
+        
         if retries <= 0 {
             let queue = self.completionQueue
             self.completionQueue.removeAll()
@@ -58,6 +68,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if loadId != self.currentLoadId { return }
+            
             webView.evaluateJavaScript("document.documentElement.outerHTML") { [weak self] result, _ in
                 let html = (result as? String) ?? ""
                 guard let self = self else { return }
@@ -70,7 +82,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                         completion(html)
                     }
                 } else {
-                    self.checkDOM(webView: webView, retries: retries - 1)
+                    self.checkDOM(webView: webView, loadId: loadId, retries: retries - 1)
                 }
             }
         }
