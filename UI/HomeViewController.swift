@@ -1,17 +1,41 @@
 import UIKit
 
-class HomeViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
+class HomeViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UISearchBarDelegate {
     
     var collectionView: UICollectionView!
     var movies: [Movie] = []
+    let activityIndicator = UIActivityIndicatorView(style: .large)
     
     override func viewDidLoad() {
         super.viewDidLoad()
         self.title = "AnimeVietsub"
         self.view.backgroundColor = .systemBackground
         
+        setupSearchBar()
         setupCollectionView()
+        setupLoadingIndicator()
+        
         fetchData()
+    }
+    
+    private func setupSearchBar() {
+        let searchController = UISearchController(searchResultsController: nil)
+        searchController.searchBar.delegate = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.searchBar.placeholder = "Tìm kiếm Anime..."
+        navigationItem.searchController = searchController
+        navigationItem.hidesSearchBarWhenScrolling = false
+        definesPresentationContext = true
+    }
+    
+    private func setupLoadingIndicator() {
+        activityIndicator.translatesAutoresizingMaskIntoConstraints = false
+        activityIndicator.color = .systemRed
+        view.addSubview(activityIndicator)
+        NSLayoutConstraint.activate([
+            activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            activityIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
     }
     
     private func setupCollectionView() {
@@ -31,11 +55,38 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
     }
     
     private func fetchData() {
-        // Cào dữ liệu từ trang chủ
+        activityIndicator.startAnimating()
+        collectionView.isHidden = true
+        
         NetworkManager.shared.fetchHomeMovies { [weak self] fetchedMovies in
             self?.movies = fetchedMovies
+            self?.activityIndicator.stopAnimating()
+            self?.collectionView.isHidden = false
             self?.collectionView.reloadData()
         }
+    }
+    
+    // MARK: - Search
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        guard let text = searchBar.text, !text.isEmpty else { return }
+        let keyword = text.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? text
+        let searchUrl = "\(NetworkManager.shared.resolvedDomain)/tim-kiem/\(keyword)/"
+        
+        activityIndicator.startAnimating()
+        collectionView.isHidden = true
+        
+        NetworkManager.shared.fetchHTML(url: searchUrl) { [weak self] html in
+            NetworkManager.shared.parseMovies(html: html) { fetchedMovies in
+                self?.movies = fetchedMovies
+                self?.activityIndicator.stopAnimating()
+                self?.collectionView.isHidden = false
+                self?.collectionView.reloadData()
+            }
+        }
+    }
+    
+    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
+        fetchData()
     }
     
     // MARK: - UICollectionViewDataSource
