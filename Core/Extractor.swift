@@ -3,7 +3,7 @@ import Foundation
 class Extractor {
 
     // 1. Lấy link iframe hoặc direct link từ trang xem-phim.html
-    static func resolveStream(episodeUrl: String, completion: @escaping (URL?) -> Void) {
+    static func resolveStream(episodeUrl: String, completion: @escaping (Stream?) -> Void) {
         // Dùng fetchHTML của NetworkManager (WKWebView) để bypass Cloudflare 403
         NetworkManager.shared.fetchHTML(url: episodeUrl) { html in
 
@@ -11,6 +11,9 @@ class Extractor {
                 Logger.shared.log("[Extractor] HTML rỗng - WKWebView không tải được trang tập phim")
                 return completion(nil)
             }
+
+            // Referer mặc định khi luồng trỏ thẳng từ AVS (không qua iframe).
+            let defaultReferer = "\(NetworkManager.shared.resolvedDomain)/"
 
             // (a) Thử bóc object PLAYER_DATA. Trang dùng cả `window.PLAYER_DATA = {...}` lẫn
             //     `var PLAYER_DATA = {...}` tùy theme nên không bắt buộc tiền tố `window.`.
@@ -30,7 +33,8 @@ class Extractor {
                     if playTech == "iframe" || link.contains("googleapiscdn") || link.contains("/player/") {
                         return extractFromIframe(iframeUrl: link, completion: completion)
                     } else if link.lowercased().contains(".m3u8") || link.lowercased().contains(".mp4") {
-                        return completion(URL(string: link))
+                        guard let url = URL(string: link) else { return completion(nil) }
+                        return completion(Stream(url: url, referer: defaultReferer))
                     } else {
                         return extractFromIframe(iframeUrl: link, completion: completion)
                     }
@@ -46,7 +50,8 @@ class Extractor {
                let range = Range(match.range(at: 1), in: html) {
                 let raw = String(html[range]).replacingOccurrences(of: "\\/", with: "/")
                 Logger.shared.log("[Extractor] Bắt được m3u8 trực tiếp trong HTML: \(raw)")
-                return completion(URL(string: raw))
+                guard let url = URL(string: raw) else { return completion(nil) }
+                return completion(Stream(url: url, referer: defaultReferer))
             }
 
             // (c) Fallback: tìm link iframe player (stream.googleapiscdn.com/player/HASH) rồi mở để bóc m3u8.
@@ -72,10 +77,20 @@ class Extractor {
         }
     }
 
-    // 2. Chui vào iframe bên thứ 3 để bóc link m3u8 cuối cùng
-    private static func extractFromIframe(iframeUrl: String, completion: @escaping (URL?) -> Void) {
+    // 2. Chui vào iframe bên thứ 3 để bóc link m3u8 cuối cùng.
+    // Referer trả về là origin của iframe vì server stream check Referer dựa trên đó.
+    private static func extractFromIframe(iframeUrl: String, completion: @escaping (Stream?) -> Void) {
         // Trỏ NetworkManager fetch iframe URL thông qua WKWebView để bypass Cloudflare Bot Detection trên CDN
         NetworkManager.shared.fetchHTML(url: iframeUrl, waitForIframe: true) { html in
+            // Referer cần là origin (scheme + host), không phải full URL — server stream
+            // thường so sánh prefix "https://stream.googleapiscdn.com/".
+            let referer: String = {
+                if let u = URL(string: iframeUrl), let host = u.host {
+                    return "\(u.scheme ?? "https")://\(host)/"
+                }
+                return iframeUrl
+            }()
+
             if html.isEmpty {
                 Logger.shared.log("[Extractor] Iframe \(iframeUrl) trả về rỗng (CF challenge chưa giải xong?).")
                 return completion(nil)
@@ -87,7 +102,9 @@ class Extractor {
                let range = Range(match.range(at: 1), in: html) {
                 let rawUrl = String(html[range]).replacingOccurrences(of: "\\/", with: "/")
                 Logger.shared.log("[Extractor] Bóc được m3u8 từ iframe: \(rawUrl)")
-                completion(URL(string: rawUrl))
+                Logger.shared.log("[Extractor] Referer cho stream: \(referer)")
+                guard let url = URL(string: rawUrl) else { return completion(nil) }
+                completion(Stream(url: url, referer: referer))
             } else {
                 Logger.shared.log("[Extractor] Không tìm thấy m3u8 trong iframe: \(iframeUrl)")
                 Logger.shared.log("[Extractor] iframe HTML dài \(html.count) ký tự. Quanh các từ khoá:")
