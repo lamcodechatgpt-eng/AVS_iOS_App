@@ -6,16 +6,41 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     
     // Link gốc bất tử (bit.ly) dùng để dự phòng khi domain chết
     let backupUrl = "https://bit.ly/animevietsubtv"
-    
-    // Domain hiện tại, tự động lưu vào máy để các lần mở app sau load cực nhanh không cần qua bit.ly
+
+    // Domain hiện tại, tự động lưu vào máy để các lần mở app sau load cực nhanh không cần qua bit.ly.
+    // Chỉ chấp nhận host khớp với một trong các mẫu AVS để tránh bị nhiễm bởi iframe player
+    // (vd stream.googleapiscdn.com) trong didFinish.
+    private static let defaultDomain = "https://animevietsub.by"
+    private static func isAVSHost(_ host: String) -> Bool {
+        let h = host.lowercased()
+        return h.contains("animevietsub")
+            || h.contains("avsub")
+            || h.contains("vsub")
+            || h.contains("animevsub")
+    }
+
     var resolvedDomain: String {
         get {
-            return UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") ?? "https://animevietsub.by"
+            let stored = UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") ?? Self.defaultDomain
+            // Phòng vệ: nếu giá trị đã lưu trước đây bị ghi đè bằng host khác (vd
+            // stream.googleapiscdn.com từ iframe player) thì trả về default thay vì
+            // dùng giá trị hỏng. Đồng thời xoá luôn để các lần sau không sa lại.
+            if let url = URL(string: stored), let host = url.host, Self.isAVSHost(host) {
+                return stored
+            }
+            UserDefaults.standard.removeObject(forKey: "AVS_ResolvedDomain")
+            return Self.defaultDomain
         }
         set {
-            if newValue.hasPrefix("http") && UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") != newValue {
+            guard newValue.hasPrefix("http"),
+                  let host = URL(string: newValue)?.host,
+                  Self.isAVSHost(host) else {
+                print("Bỏ qua domain không hợp lệ: \(newValue)")
+                return
+            }
+            if UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") != newValue {
                 UserDefaults.standard.set(newValue, forKey: "AVS_ResolvedDomain")
-                print("Đã cập nhật domain mới: \\(newValue)")
+                print("Đã cập nhật domain mới: \(newValue)")
             }
         }
     }
@@ -160,15 +185,19 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     || path.contains("xem-phim")
                     || path.contains("-tap-")
                     || path.contains("/tap-")
-                let retries = isWatchLike ? 40 : 15
+                let retries = isWatchLike ? 40 : 10
                 self.checkDOM(webView: self.webView, loadId: loadId, retries: retries, waitForIframe: waitForIframe)
             }
         }
     }
     
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if let host = webView.url?.host {
-            self.resolvedDomain = "https://" + host
+        // Setter của resolvedDomain đã tự lọc theo isAVSHost, ở đây chỉ cần log để debug.
+        if let url = webView.url {
+            print("[WebView] didFinish: \(url.absoluteString)")
+            if let host = url.host {
+                self.resolvedDomain = "https://" + host
+            }
         }
     }
     
@@ -252,21 +281,40 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
     
+    // Danh sách domain AVS quen thuộc, thử lần lượt nếu domain đã lưu fail.
+    // bit.ly là phương án cuối vì chậm và đôi khi rate-limit.
+    private let knownDomains = [
+        "https://animevietsub.by",
+        "https://animevietsub.cx",
+        "https://animevietsub.lol",
+        "https://animevietsub.show"
+    ]
+
     func fetchHomeMovies(completion: @escaping ([Movie]) -> Void) {
-        // Ưu tiên dùng domain đã lưu (nhanh hơn)
-        fetchHTML(url: resolvedDomain) { html in
-            if html.isEmpty {
-                // Nếu domain cũ đã chết, tự động dùng bit.ly để tìm domain mới
-                print("Domain cũ không phản hồi, đang dùng backup link...")
-                self.fetchHTML(url: self.backupUrl) { newHtml in
-                    self.parseMovies(html: newHtml, completion: completion)
-                }
-            } else {
+        tryHomeFromDomains([resolvedDomain] + knownDomains.filter { $0 != resolvedDomain }, completion: completion)
+    }
+
+    private func tryHomeFromDomains(_ domains: [String], completion: @escaping ([Movie]) -> Void) {
+        guard let first = domains.first else {
+            // Cạn danh sách → fallback cuối qua bit.ly
+            print("[fetchHomeMovies] Tất cả domain known đều fail, thử bit.ly")
+            fetchHTML(url: backupUrl) { html in
                 self.parseMovies(html: html, completion: completion)
+            }
+            return
+        }
+        print("[fetchHomeMovies] Thử domain: \(first)")
+        fetchHTML(url: first) { html in
+            self.parseMovies(html: html) { movies in
+                if movies.isEmpty {
+                    self.tryHomeFromDomains(Array(domains.dropFirst()), completion: completion)
+                } else {
+                    completion(movies)
+                }
             }
         }
     }
-    
+
     func parseMovies(html: String, completion: @escaping ([Movie]) -> Void) {
         var movies: [Movie] = appendMovies(from: html, pattern: parseMoviesPrimaryPattern)
         if movies.isEmpty {
