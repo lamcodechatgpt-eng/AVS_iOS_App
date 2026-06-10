@@ -185,45 +185,62 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     if (autoPlayTries > 60) return; // ~30s
                     var path = window.location.pathname || '';
                     var host = window.location.host || '';
-                    // Chạy trên cả trang xem AVS LẪN iframe player (host có "stream" hoặc
-                    // path có "/player/") — jwplayer trong iframe đôi khi cần click giả để
-                    // bắt đầu fetch m3u8.
-                    var looksLikeWatch = path.indexOf('xem-phim') !== -1
-                        || path.indexOf('-tap-') !== -1
-                        || path.indexOf('/tap-') !== -1
-                        || path.indexOf('/player/') !== -1
-                        || host.indexOf('googleapiscdn') !== -1
-                        || host.indexOf('streamlare') !== -1
-                        || (document.documentElement.outerHTML || '').indexOf('PLAYER_DATA') !== -1;
-                    if (!looksLikeWatch) { setTimeout(autoPlay, 500); return; }
-
-                    // Đã thấy URL luồng thực sự — không cần click tiếp.
                     var topHTML = document.documentElement.outerHTML || '';
+
+                    var isIframePlayer = path.indexOf('/player/') !== -1
+                        || host.indexOf('googleapiscdn') !== -1
+                        || host.indexOf('streamlare') !== -1;
+                    var isAVSWatch = path.indexOf('xem-phim') !== -1
+                        || path.indexOf('-tap-') !== -1
+                        || path.indexOf('/tap-') !== -1;
+
+                    if (!isIframePlayer && !isAVSWatch) { setTimeout(autoPlay, 500); return; }
+
+                    // Đã có m3u8 URL thật trong DOM → dừng (đã xong việc).
                     if (/[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.m3u8/i.test(topHTML)) return;
 
-                    // Bấm mọi candidate (AVS button + JWPlayer overlay + thẻ video).
-                    var candidates = document.querySelectorAll(
-                        '#btn-film-watch, .btn-film-watch, .play-button, .video-play-button, '
-                        + '.btn-play, #btn-watch, .watch-button, '
-                        + '.jw-icon-display, .jw-display-icon-container, .jw-icon-playback, '
-                        + '#player, .jwplayer, video, '
-                        + '.halim-watching, a.halim-watching, .episode-active, '
-                        + '.halim-btn.halim-btn-2, .episode-link, .list-episode a, '
-                        + '.halim-list-eps a'
-                    );
-                    for (var i = 0; i < candidates.length && i < 10; i++) {
-                        try { candidates[i].click(); } catch (e) {}
-                    }
-                    var video = document.querySelector('video');
-                    if (video) { try { video.play(); } catch (e) {} }
-                    // JWPlayer API: nếu sẵn sàng, gọi play() trực tiếp.
-                    try {
-                        if (typeof jwplayer === 'function') {
-                            var jw = jwplayer();
-                            if (jw && typeof jw.play === 'function') jw.play(true);
+                    // Trên trang AVS: PLAYER_DATA đã được render server-side. Extractor
+                    // sẽ bóc từ HTML, KHÔNG CẦN click bất cứ gì. Click vào episode link
+                    // (anchor tag) sẽ điều hướng trang, gây reload → JWPlayer iframe
+                    // fetch m3u8 nhiều lần → server rate-limit (HTTP 429).
+                    if (isAVSWatch) {
+                        if (topHTML.indexOf('PLAYER_DATA') !== -1) return;
+                        // Chưa có PLAYER_DATA: thử bấm chỉ nút Xem phim (button hoặc div,
+                        // KHÔNG anchor) để trigger AJAX. Tuyệt đối không click anchor.
+                        var safe = document.querySelectorAll(
+                            'button#btn-film-watch, button.btn-film-watch, '
+                            + 'button.play-button, button.video-play-button, '
+                            + 'button.btn-play, button#btn-watch, button.watch-button, '
+                            + 'div.play-button, div.video-play-button, div.btn-play'
+                        );
+                        for (var i = 0; i < safe.length && i < 4; i++) {
+                            try { safe[i].click(); } catch (e) {}
                         }
-                    } catch (e) {}
-                    setTimeout(autoPlay, 500);
+                        setTimeout(autoPlay, 500);
+                        return;
+                    }
+
+                    // Trên iframe player: click overlay JWPlayer / gọi API play().
+                    // Cũng tránh anchor để không bị điều hướng.
+                    if (isIframePlayer) {
+                        var jw = document.querySelectorAll(
+                            '.jw-icon-display, .jw-display-icon-container, '
+                            + '.jw-icon-playback, #player, .jwplayer'
+                        );
+                        for (var j = 0; j < jw.length && j < 5; j++) {
+                            try { jw[j].click(); } catch (e) {}
+                        }
+                        var video = document.querySelector('video');
+                        if (video) { try { video.play(); } catch (e) {} }
+                        try {
+                            if (typeof jwplayer === 'function') {
+                                var jp = jwplayer();
+                                if (jp && typeof jp.play === 'function') jp.play(true);
+                            }
+                        } catch (e) {}
+                        setTimeout(autoPlay, 500);
+                        return;
+                    }
                 };
                 // Khởi động auto-click trên cả trang xem AVS lẫn iframe player của bên thứ 3.
                 // Trang chủ/search/info bỏ qua để khỏi tốn CPU.

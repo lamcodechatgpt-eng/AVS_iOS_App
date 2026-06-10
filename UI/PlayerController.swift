@@ -69,9 +69,18 @@ class PlayerController: UIViewController {
                 }
 
                 Logger.shared.log("[PlayerController] Tạo AVPlayer với m3u8=\(stream.url.absoluteString) referer=\(stream.referer)")
-                self.statusLabel.text = "Đang xác minh server stream..."
-                self.activityIndicator.startAnimating()
-                self.preflightAndAttach(stream: stream)
+                self.statusLabel.text = "Đang khởi động player..."
+                // KHÔNG preflight: server stream rate-limit theo URL (HTTP 429 nếu hit 2 lần
+                // trong vài giây). JWPlayer trong iframe đã fetch lúc capture URL — preflight
+                // HEAD sẽ là request thứ 2, đẩy AVPlayer xuống request thứ 3 → 429.
+                self.attachPlayer(for: stream)
+            }
+        }
+    }
+
+    /// Giữ lại để debug khi cần: gửi HEAD thử URL với header để xem server trả status nào.
+    /// Không gọi mặc định vì sẽ làm tăng rate-limit counter và khiến AVPlayer dính 429.
+    private func preflightAndAttach(stream: Stream) {
             }
         }
     }
