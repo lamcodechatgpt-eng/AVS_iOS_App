@@ -493,7 +493,20 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     ]
 
     func fetchHomeMovies(completion: @escaping ([Movie]) -> Void) {
-        tryHomeFromDomains([resolvedDomain] + knownDomains.filter { $0 != resolvedDomain }, completion: completion)
+        // Cache 30 phút: cold launch hiện list ngay rồi refresh ngầm.
+        if let cached: [Movie] = DiskCache.shared.get("home", ttl: 1800, as: [Movie].self), !cached.isEmpty {
+            Logger.shared.log("[fetchHomeMovies] CACHE HIT (\(cached.count) phim) — trả ngay + refresh nền")
+            completion(cached)
+            // Refresh ngầm để cập nhật cho lần load sau, không update UI.
+            tryHomeFromDomains([resolvedDomain] + knownDomains.filter { $0 != resolvedDomain }) { fresh in
+                if !fresh.isEmpty { DiskCache.shared.set(fresh, forKey: "home") }
+            }
+            return
+        }
+        tryHomeFromDomains([resolvedDomain] + knownDomains.filter { $0 != resolvedDomain }) { movies in
+            if !movies.isEmpty { DiskCache.shared.set(movies, forKey: "home") }
+            completion(movies)
+        }
     }
 
     private func tryHomeFromDomains(_ domains: [String], completion: @escaping ([Movie]) -> Void) {
@@ -519,14 +532,75 @@ class NetworkManager: NSObject, WKNavigationDelegate {
 
     func parseMovies(html: String, completion: @escaping ([Movie]) -> Void) {
         var movies: [Movie] = appendMovies(from: html, pattern: parseMoviesPrimaryPattern)
+        var matchedPattern = "primary"
         if movies.isEmpty {
-            // Site đôi khi thay tên class hoặc bỏ <span class="mli-eps">. Pattern dự phòng
-            // chỉ yêu cầu cấu trúc tối thiểu: <article ... href ... img src ... Title >.
-            // epsRange là rỗng nên ta nhận diện ở appendMovies.
             movies = appendMovies(from: html, pattern: parseMoviesFallbackPattern)
+            matchedPattern = "fallback"
         }
-        Logger.shared.log("[parseMovies] tìm thấy \(movies.count) phim (html=\(html.count) ký tự)")
+        if movies.isEmpty {
+            // Cuối cùng: bắt mọi anchor <a href="...phim/..."> có ảnh + tiêu đề bên trong.
+            // Trang search/filter của AVS dùng layout khác — pattern lỏng nhất.
+            movies = appendMoviesLoose(from: html)
+            matchedPattern = "loose"
+        }
+        Logger.shared.log("[parseMovies] \(matchedPattern) → \(movies.count) phim (html=\(html.count) ký tự)")
         completion(movies)
+    }
+
+    /// Pattern lỏng nhất: tìm mọi `<a href="...phim/...">` và lấy `<img>` + text trong cùng anchor.
+    /// Dùng cho trang search / genre / sort khi không khớp template chính.
+    private func appendMoviesLoose(from html: String) -> [Movie] {
+        var result: [Movie] = []
+        var seen = Set<String>()
+        let pattern = "(?i)<a[^>]*?href=\"([^\"]*?/phim/[^\"]+?)\"[^>]*>([\\s\\S]{0,2000}?)</a>"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return [] }
+        let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        for m in matches {
+            guard let linkRange = Range(m.range(at: 1), in: html),
+                  let inner = Range(m.range(at: 2), in: html) else { continue }
+            let link = String(html[linkRange])
+            if seen.contains(link) { continue }
+            let innerHtml = String(html[inner])
+
+            // Image src
+            var thumb = ""
+            if let imgRegex = try? NSRegularExpression(pattern: "(?i)<img[^>]*?(?:data-src|data-original|src)=\"([^\"]+)\"") {
+                if let imgMatch = imgRegex.firstMatch(in: innerHtml, range: NSRange(innerHtml.startIndex..., in: innerHtml)),
+                   let r = Range(imgMatch.range(at: 1), in: innerHtml) {
+                    thumb = String(innerHtml[r])
+                }
+            }
+            // Title: prefer <h*> content, else <img alt>, else stripped text
+            var title = ""
+            if let hRegex = try? NSRegularExpression(pattern: "(?i)<h[1-6][^>]*>([^<]+)</h[1-6]>") {
+                if let hMatch = hRegex.firstMatch(in: innerHtml, range: NSRange(innerHtml.startIndex..., in: innerHtml)),
+                   let r = Range(hMatch.range(at: 1), in: innerHtml) {
+                    title = String(innerHtml[r])
+                }
+            }
+            if title.isEmpty,
+               let altRegex = try? NSRegularExpression(pattern: "(?i)<img[^>]*?alt=\"([^\"]+)\""),
+               let altMatch = altRegex.firstMatch(in: innerHtml, range: NSRange(innerHtml.startIndex..., in: innerHtml)),
+               let r = Range(altMatch.range(at: 1), in: innerHtml) {
+                title = String(innerHtml[r])
+            }
+            if title.isEmpty {
+                title = innerHtml
+                    .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression, range: nil)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Bỏ qua match rác (link điều hướng, anchor trống)
+            if trimmedTitle.isEmpty || trimmedTitle.count > 200 || thumb.isEmpty { continue }
+            seen.insert(link)
+            result.append(Movie(
+                title: trimmedTitle,
+                link: link.hasPrefix("http") ? link : NetworkManager.shared.resolvedDomain + link,
+                thumbUrl: thumb,
+                episodeStatus: ""
+            ))
+        }
+        return result
     }
 
     private var parseMoviesPrimaryPattern: String {
@@ -573,6 +647,13 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
     
     func fetchEpisodes(movieUrl: String, isRecursive: Bool = false, completion: @escaping ([Episode]) -> Void) {
+        // Cache 1 giờ theo URL phim.
+        let cacheKey = "episodes." + (movieUrl.data(using: .utf8)?.base64EncodedString() ?? movieUrl)
+        if !isRecursive, let cached: [Episode] = DiskCache.shared.get(cacheKey, ttl: 3600, as: [Episode].self), !cached.isEmpty {
+            Logger.shared.log("[fetchEpisodes] CACHE HIT \(cached.count) tập")
+            completion(cached)
+            return
+        }
         fetchHTML(url: movieUrl) { html in
             var episodes: [Episode] = []
             // Regex bắt tất cả các link chứa "tap-" hoặc có chữ "Tập" bên trong
@@ -615,6 +696,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             if uniqueEps.count <= 4 && !isRecursive && !uniqueEps.isEmpty {
                 self.fetchEpisodes(movieUrl: uniqueEps[0].link, isRecursive: true, completion: completion)
             } else {
+                if !uniqueEps.isEmpty { DiskCache.shared.set(uniqueEps, forKey: cacheKey) }
                 completion(uniqueEps)
             }
         }

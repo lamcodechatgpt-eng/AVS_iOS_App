@@ -18,6 +18,7 @@ class PlayerController: UIViewController {
     private let skipIntroButton = UIButton(type: .system)
     private let episodePickerButton = UIButton(type: .system)
     private let nextEpisodeButton = UIButton(type: .system)
+    private let speedButton = UIButton(type: .system)
     private weak var currentPlayer: AVPlayer?
     private weak var currentPlayerVC: AVPlayerViewController?
 
@@ -247,6 +248,10 @@ class PlayerController: UIViewController {
         let player = AVPlayer(playerItem: item)
         let playerVC = AVPlayerViewController()
         playerVC.player = player
+        playerVC.allowsPictureInPicturePlayback = true
+        if #available(iOS 14.2, *) {
+            playerVC.canStartPictureInPictureAutomaticallyFromInline = true
+        }
         currentPlayer = player
         currentPlayerVC = playerVC
 
@@ -400,6 +405,7 @@ class PlayerController: UIViewController {
         }
         configureOverlayButton(episodePickerButton, title: "📺", action: #selector(showEpisodePicker))
         configureOverlayButton(nextEpisodeButton, title: "Tập sau ▶", action: #selector(skipToNextEpisode))
+        configureOverlayButton(speedButton, title: "1x", action: #selector(showSpeedPicker))
 
         let centerStack = UIStackView(arrangedSubviews: [skipBackwardButton, skipIntroButton, skipForwardButton])
         centerStack.axis = .horizontal
@@ -409,7 +415,7 @@ class PlayerController: UIViewController {
         centerStack.isHidden = true
         view.addSubview(centerStack)
 
-        let topStack = UIStackView(arrangedSubviews: [episodePickerButton, nextEpisodeButton])
+        let topStack = UIStackView(arrangedSubviews: [speedButton, episodePickerButton, nextEpisodeButton])
         topStack.axis = .horizontal
         topStack.spacing = 8
         topStack.translatesAutoresizingMaskIntoConstraints = false
@@ -460,6 +466,24 @@ class PlayerController: UIViewController {
 
     @objc private func skipToNextEpisode() {
         playNextEpisodeIfAvailable()
+    }
+
+    @objc private func showSpeedPicker() {
+        let speeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+        let sheet = UIAlertController(title: "Tốc độ phát", message: nil, preferredStyle: .actionSheet)
+        for s in speeds {
+            let label = s == 1.0 ? "1x (thường)" : "\(s)x"
+            sheet.addAction(UIAlertAction(title: label, style: .default) { [weak self] _ in
+                self?.currentPlayer?.rate = s
+                self?.speedButton.setTitle("\(s)x", for: .normal)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Đóng", style: .cancel))
+        if let pop = sheet.popoverPresentationController {
+            pop.sourceView = speedButton
+            pop.sourceRect = speedButton.bounds
+        }
+        present(sheet, animated: true)
     }
 
     private func playNextEpisodeIfAvailable() {

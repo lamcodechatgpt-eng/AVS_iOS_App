@@ -1,13 +1,13 @@
 import Foundation
 
-struct Movie {
+struct Movie: Codable {
     var title: String
     var link: String
     var thumbUrl: String
     var episodeStatus: String
 }
 
-struct Episode {
+struct Episode: Codable {
     var title: String
     var link: String
     var episodeId: String?

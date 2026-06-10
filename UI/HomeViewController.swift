@@ -127,28 +127,50 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
     
     private func setupCollectionView() {
         let layout = UICollectionViewFlowLayout()
-        let width = (view.bounds.width - 30) / 2
-        layout.itemSize = CGSize(width: width, height: width * 1.5)
-        layout.sectionInset = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
-        
+        // 3 cột với spacing đẹp + tỉ lệ poster 2:3 (chuẩn anime cover).
+        let columns: CGFloat = 3
+        let interItem: CGFloat = 10
+        let sideInset: CGFloat = 12
+        let totalSpacing = sideInset * 2 + interItem * (columns - 1)
+        let cellWidth = (view.bounds.width - totalSpacing) / columns
+        layout.itemSize = CGSize(width: cellWidth, height: cellWidth * 1.5)
+        layout.minimumLineSpacing = interItem
+        layout.minimumInteritemSpacing = interItem
+        layout.sectionInset = UIEdgeInsets(top: 12, left: sideInset, bottom: 12, right: sideInset)
+
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.backgroundColor = .clear
         collectionView.dataSource = self
         collectionView.delegate = self
+        collectionView.alwaysBounceVertical = true
         collectionView.register(MovieCell.self, forCellWithReuseIdentifier: "MovieCell")
-        
+
+        // Pull to refresh
+        let refresh = UIRefreshControl()
+        refresh.tintColor = .label
+        refresh.addTarget(self, action: #selector(pullToRefresh), for: .valueChanged)
+        collectionView.refreshControl = refresh
+
         view.addSubview(collectionView)
+    }
+
+    @objc private func pullToRefresh() {
+        // Xoá cache home để fetch lại.
+        DiskCache.shared.remove("home")
+        fetchData()
     }
     
     private func fetchData() {
-        activityIndicator.startAnimating()
-        collectionView.isHidden = true
-        
+        if movies.isEmpty {
+            activityIndicator.startAnimating()
+            collectionView.isHidden = true
+        }
         NetworkManager.shared.fetchHomeMovies { [weak self] fetchedMovies in
             self?.movies = fetchedMovies
             self?.activityIndicator.stopAnimating()
             self?.collectionView.isHidden = false
+            self?.collectionView.refreshControl?.endRefreshing()
             self?.collectionView.reloadData()
         }
     }
@@ -220,62 +242,94 @@ class MovieCell: UICollectionViewCell {
     let imageView = UIImageView()
     let titleLabel = UILabel()
     let epsLabel = UILabel()
-    
+    let gradientLayer = CAGradientLayer()
+    private var currentImageTask: URLSessionDataTask?
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .secondarySystemBackground
-        contentView.layer.cornerRadius = 8
+        contentView.layer.cornerRadius = 12
         contentView.clipsToBounds = true
-        
+        // Shadow trên cell (không clip để render được)
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.22
+        layer.shadowRadius = 6
+        layer.shadowOffset = CGSize(width: 0, height: 3)
+        layer.masksToBounds = false
+
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
+        imageView.backgroundColor = .tertiarySystemFill
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        
-        titleLabel.font = .systemFont(ofSize: 14, weight: .bold)
+
+        // Gradient từ trong suốt → đen ở dưới poster để text dễ đọc.
+        gradientLayer.colors = [
+            UIColor.clear.cgColor,
+            UIColor.black.withAlphaComponent(0.85).cgColor
+        ]
+        gradientLayer.locations = [0.55, 1.0]
+
+        titleLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        titleLabel.textColor = .white
         titleLabel.numberOfLines = 2
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        epsLabel.font = .systemFont(ofSize: 12, weight: .medium)
+
+        epsLabel.font = .systemFont(ofSize: 10, weight: .bold)
         epsLabel.textColor = .white
-        epsLabel.backgroundColor = UIColor.red.withAlphaComponent(0.8)
-        epsLabel.layer.cornerRadius = 4
+        epsLabel.backgroundColor = UIColor.systemRed.withAlphaComponent(0.95)
+        epsLabel.layer.cornerRadius = 6
         epsLabel.clipsToBounds = true
+        epsLabel.textAlignment = .center
         epsLabel.translatesAutoresizingMaskIntoConstraints = false
-        
+
         contentView.addSubview(imageView)
+        imageView.layer.addSublayer(gradientLayer)
         contentView.addSubview(titleLabel)
         contentView.addSubview(epsLabel)
-        
+
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
             imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            imageView.heightAnchor.constraint(equalTo: contentView.heightAnchor, multiplier: 0.8),
-            
-            titleLabel.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 4),
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
-            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
-            
-            epsLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
-            epsLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4)
+            imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+
+            epsLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
+            epsLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
+            epsLabel.heightAnchor.constraint(equalToConstant: 20)
         ])
     }
-    
+
     required init?(coder: NSCoder) { fatalError() }
-    
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        gradientLayer.frame = imageView.bounds
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        currentImageTask?.cancel()
+        imageView.image = nil
+        titleLabel.text = nil
+        epsLabel.text = nil
+        epsLabel.isHidden = true
+    }
+
     func configure(with movie: Movie) {
         titleLabel.text = movie.title
-        epsLabel.text = " \(movie.episodeStatus) "
-        
-        // Load image (Basic)
+        let trimmed = movie.episodeStatus.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            epsLabel.isHidden = true
+        } else {
+            epsLabel.isHidden = false
+            epsLabel.text = "  \(trimmed)  "
+        }
         if let url = URL(string: movie.thumbUrl) {
-            DispatchQueue.global().async {
-                if let data = try? Data(contentsOf: url), let image = UIImage(data: data) {
-                    DispatchQueue.main.async {
-                        self.imageView.image = image
-                    }
-                }
-            }
+            currentImageTask = ImageLoader.shared.load(url, into: imageView)
         }
     }
 }
