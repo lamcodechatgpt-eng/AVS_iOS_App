@@ -8,7 +8,7 @@ class Extractor {
         NetworkManager.shared.fetchHTML(url: episodeUrl) { html in
 
             if html.isEmpty {
-                print("[Extractor] HTML rỗng - WKWebView không tải được trang tập phim")
+                Logger.shared.log("[Extractor] HTML rỗng - WKWebView không tải được trang tập phim")
                 return completion(nil)
             }
 
@@ -25,7 +25,7 @@ class Extractor {
                    let link = json["link"] as? String {
 
                     let playTech = (json["playTech"] as? String) ?? ""
-                    print("[Extractor] PLAYER_DATA tìm thấy. playTech=\(playTech) link=\(link)")
+                    Logger.shared.log("[Extractor] PLAYER_DATA tìm thấy. playTech=\(playTech) link=\(link)")
 
                     if playTech == "iframe" || link.contains("googleapiscdn") || link.contains("/player/") {
                         return extractFromIframe(iframeUrl: link, completion: completion)
@@ -35,7 +35,7 @@ class Extractor {
                         return extractFromIframe(iframeUrl: link, completion: completion)
                     }
                 } else {
-                    print("[Extractor] PLAYER_DATA tìm thấy nhưng không parse được JSON: \(jsonString.prefix(200))")
+                    Logger.shared.log("[Extractor] PLAYER_DATA tìm thấy nhưng không parse được JSON: \(jsonString.prefix(200))")
                 }
             }
 
@@ -45,7 +45,7 @@ class Extractor {
                let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {
                 let raw = String(html[range]).replacingOccurrences(of: "\\/", with: "/")
-                print("[Extractor] Bắt được m3u8 trực tiếp trong HTML: \(raw)")
+                Logger.shared.log("[Extractor] Bắt được m3u8 trực tiếp trong HTML: \(raw)")
                 return completion(URL(string: raw))
             }
 
@@ -55,17 +55,17 @@ class Extractor {
                let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {
                 let iframeUrl = String(html[range]).replacingOccurrences(of: "\\/", with: "/")
-                print("[Extractor] Tìm thấy link iframe player: \(iframeUrl)")
+                Logger.shared.log("[Extractor] Tìm thấy link iframe player: \(iframeUrl)")
                 return extractFromIframe(iframeUrl: iframeUrl, completion: completion)
             }
 
-            print("[Extractor] Không tìm thấy PLAYER_DATA hay link luồng trong HTML (\(html.count) ký tự).")
+            Logger.shared.log("[Extractor] Không tìm thấy PLAYER_DATA hay link luồng trong HTML (\(html.count) ký tự).")
             // Trích vài ký tự quanh các từ khoá quen thuộc để dễ debug khi server đổi format.
             for keyword in ["PLAYER_DATA", "playTech", "data-id", "halim-btn", "googleapiscdn", "m3u8", "iframe"] {
                 if let range = html.range(of: keyword) {
                     let start = html.index(range.lowerBound, offsetBy: -50, limitedBy: html.startIndex) ?? html.startIndex
                     let end = html.index(range.upperBound, offsetBy: 200, limitedBy: html.endIndex) ?? html.endIndex
-                    print("[Extractor]   '\(keyword)' xuất hiện: ...\(html[start..<end])...")
+                    Logger.shared.log("[Extractor]   '\(keyword)' xuất hiện: ...\(html[start..<end])...")
                 }
             }
             completion(nil)
@@ -77,7 +77,7 @@ class Extractor {
         // Trỏ NetworkManager fetch iframe URL thông qua WKWebView để bypass Cloudflare Bot Detection trên CDN
         NetworkManager.shared.fetchHTML(url: iframeUrl, waitForIframe: true) { html in
             if html.isEmpty {
-                print("[Extractor] Iframe \(iframeUrl) trả về rỗng (CF challenge chưa giải xong?).")
+                Logger.shared.log("[Extractor] Iframe \(iframeUrl) trả về rỗng (CF challenge chưa giải xong?).")
                 return completion(nil)
             }
             // Tìm file m3u8 trong source của iframe (dùng regex lỏng lẻo hơn để bắt cả file: "...", src="...", source: '...')
@@ -86,10 +86,10 @@ class Extractor {
                let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {
                 let rawUrl = String(html[range]).replacingOccurrences(of: "\\/", with: "/")
-                print("[Extractor] Bóc được m3u8 từ iframe: \(rawUrl)")
+                Logger.shared.log("[Extractor] Bóc được m3u8 từ iframe: \(rawUrl)")
                 completion(URL(string: rawUrl))
             } else {
-                print("[Extractor] Không tìm thấy m3u8 trong iframe: \(iframeUrl)")
+                Logger.shared.log("[Extractor] Không tìm thấy m3u8 trong iframe: \(iframeUrl)")
                 completion(nil)
             }
         }

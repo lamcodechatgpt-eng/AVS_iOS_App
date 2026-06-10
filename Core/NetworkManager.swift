@@ -35,12 +35,12 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             guard newValue.hasPrefix("http"),
                   let host = URL(string: newValue)?.host,
                   Self.isAVSHost(host) else {
-                print("Bỏ qua domain không hợp lệ: \(newValue)")
+                Logger.shared.log("Bỏ qua domain không hợp lệ: \(newValue)")
                 return
             }
             if UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") != newValue {
                 UserDefaults.standard.set(newValue, forKey: "AVS_ResolvedDomain")
-                print("Đã cập nhật domain mới: \(newValue)")
+                Logger.shared.log("Đã cập nhật domain mới: \(newValue)")
             }
         }
     }
@@ -274,7 +274,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // Setter của resolvedDomain đã tự lọc theo isAVSHost, ở đây chỉ cần log để debug.
         if let url = webView.url {
-            print("[WebView] didFinish: \(url.absoluteString)")
+            Logger.shared.log("[WebView] didFinish: \(url.absoluteString)")
             if let host = url.host {
                 self.resolvedDomain = "https://" + host
             }
@@ -377,13 +377,13 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     private func tryHomeFromDomains(_ domains: [String], completion: @escaping ([Movie]) -> Void) {
         guard let first = domains.first else {
             // Cạn danh sách → fallback cuối qua bit.ly
-            print("[fetchHomeMovies] Tất cả domain known đều fail, thử bit.ly")
+            Logger.shared.log("[fetchHomeMovies] Tất cả domain known đều fail, thử bit.ly")
             fetchHTML(url: backupUrl) { html in
                 self.parseMovies(html: html, completion: completion)
             }
             return
         }
-        print("[fetchHomeMovies] Thử domain: \(first)")
+        Logger.shared.log("[fetchHomeMovies] Thử domain: \(first)")
         fetchHTML(url: first) { html in
             self.parseMovies(html: html) { movies in
                 if movies.isEmpty {
@@ -403,7 +403,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             // epsRange là rỗng nên ta nhận diện ở appendMovies.
             movies = appendMovies(from: html, pattern: parseMoviesFallbackPattern)
         }
-        print("[parseMovies] tìm thấy \(movies.count) phim (html=\(html.count) ký tự)")
+        Logger.shared.log("[parseMovies] tìm thấy \(movies.count) phim (html=\(html.count) ký tự)")
         completion(movies)
     }
 
