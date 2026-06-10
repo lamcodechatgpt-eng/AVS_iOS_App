@@ -106,8 +106,19 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     if (video) { try { video.play(); } catch (e) {} }
                     if (!clicked) setTimeout(autoPlay, 500);
                 };
-                document.addEventListener("DOMContentLoaded", function() { setTimeout(autoPlay, 800); });
-                if (document.readyState !== 'loading') setTimeout(autoPlay, 800);
+                // Chỉ khởi động auto-click khi đường dẫn rõ ràng là trang xem phim.
+                // Không polling trên trang chủ / trang tìm kiếm / trang thông tin để
+                // tránh tốn CPU và làm chậm checkDOM của các trang đó.
+                var startAutoPlayIfWatch = function() {
+                    var p = window.location.pathname || '';
+                    if (p.indexOf('xem-phim') !== -1
+                        || p.indexOf('-tap-') !== -1
+                        || p.indexOf('/tap-') !== -1) {
+                        setTimeout(autoPlay, 800);
+                    }
+                };
+                document.addEventListener("DOMContentLoaded", startAutoPlayIfWatch);
+                if (document.readyState !== 'loading') startAutoPlayIfWatch();
             })();
             """
             let script = WKUserScript(source: jsHook, injectionTime: .atDocumentStart, forMainFrameOnly: false)
@@ -128,21 +139,29 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         DispatchQueue.main.async {
             // Phải add vào view hierarchy thì WKWebView mới chạy thực tế trên iOS
             if self.webView.superview == nil, let window = UIApplication.shared.windows.first {
-                window.addSubview(self.webView) 
+                window.addSubview(self.webView)
             }
-            
+
             self.currentLoadId += 1
             let loadId = self.currentLoadId
-            
+
             self.completionQueue.removeAll() // Hủy các request cũ đang bị kẹt
             self.completionQueue.append(completion)
-            
+
             if let targetUrl = URL(string: url) {
                 var req = URLRequest(url: targetUrl)
                 req.setValue(self.resolvedDomain + "/", forHTTPHeaderField: "Referer")
                 self.webView.load(req)
-                // Khởi động vòng lặp kiểm tra DOM ngay lập tức
-                self.checkDOM(webView: self.webView, loadId: loadId, retries: 40, waitForIframe: waitForIframe) // 40s: auto-click cần thêm thời gian để AJAX trả luồng
+                // Trang xem phim cần ~40s vì còn phải chờ JS auto-click → AJAX trả luồng.
+                // Trang chủ/tìm kiếm/thông tin chỉ cần render HTML tĩnh nên 15s là đủ;
+                // hết thì rơi xuống fallback (bit.ly) ngay thay vì để user chờ mãi.
+                let path = targetUrl.path
+                let isWatchLike = waitForIframe
+                    || path.contains("xem-phim")
+                    || path.contains("-tap-")
+                    || path.contains("/tap-")
+                let retries = isWatchLike ? 40 : 15
+                self.checkDOM(webView: self.webView, loadId: loadId, retries: retries, waitForIframe: waitForIframe)
             }
         }
     }
@@ -190,11 +209,25 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                         || html.indexOf('hydrax') !== -1;
                 }
                 
-                var hasTPost = document.querySelectorAll('.TPost, .mli-eps, article').length > 0;
-                var isHome = (path === '/' || path === '' || html.indexOf('TPostMv') !== -1 || html.indexOf('MovieList') !== -1) && hasTPost;
-                
+                // Home/list được coi là sẵn sàng khi có ít nhất một số thẻ phim đã render.
+                // Chấp nhận nhiều tên class vì site đổi theme theo từng đợt; nếu không khớp
+                // selector nào thì kiểm tra số link /phim/ trong DOM như fallback cuối.
+                var cardCount = document.querySelectorAll(
+                    '.TPost, .TPostMv, .mli-eps, article, .ml-item, .halim-item, .movies-list .item'
+                ).length;
+                var phimLinkCount = document.querySelectorAll('a[href*="/phim/"]').length;
+                var hasMovieCards = cardCount > 0 || phimLinkCount >= 6;
+
+                var isListLike = path === '/' || path === ''
+                    || path.indexOf('/phim') === 0
+                    || path.indexOf('/tim-kiem') === 0
+                    || path.indexOf('/the-loai') === 0
+                    || html.indexOf('TPostMv') !== -1
+                    || html.indexOf('MovieList') !== -1;
+                var isHome = isListLike && hasMovieCards;
+
                 var isInfo = html.indexOf('MovieInfo') !== -1 || html.indexOf('MvTbCn') !== -1;
-                
+
                 return isHome || isInfo || html.indexOf('.m3u8') !== -1;
             })();
             """
@@ -235,31 +268,58 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
     
     func parseMovies(html: String, completion: @escaping ([Movie]) -> Void) {
-        var movies: [Movie] = []
-        let pattern = "<article id=\"post-[\\s\\S]*?<a href=\"([^\"]+)\"[\\s\\S]*?<img[\\s\\S]*?src=\"([^\"]+)\"[\\s\\S]*?<span class=\"mli-eps\">(.*?)</span>[\\s\\S]*?<h2 class=\"Title\">([^<]+)</h2>"
-        
-        if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
-            let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
-            for match in matches {
-                if let linkRange = Range(match.range(at: 1), in: html),
-                   let imgRange = Range(match.range(at: 2), in: html),
-                   let epsRange = Range(match.range(at: 3), in: html),
-                   let titleRange = Range(match.range(at: 4), in: html) {
-                    
-                    let link = String(html[linkRange])
-                    let thumbUrl = String(html[imgRange])
-                    let epsRaw = String(html[epsRange])
-                        .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression, range: nil)
-                    let title = String(html[titleRange])
-                    
-                    movies.append(Movie(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                                        link: link.hasPrefix("http") ? link : NetworkManager.shared.resolvedDomain + link,
-                                        thumbUrl: thumbUrl,
-                                        episodeStatus: epsRaw.trimmingCharacters(in: .whitespacesAndNewlines)))
-                }
-            }
+        var movies: [Movie] = appendMovies(from: html, pattern: parseMoviesPrimaryPattern)
+        if movies.isEmpty {
+            // Site đôi khi thay tên class hoặc bỏ <span class="mli-eps">. Pattern dự phòng
+            // chỉ yêu cầu cấu trúc tối thiểu: <article ... href ... img src ... Title >.
+            // epsRange là rỗng nên ta nhận diện ở appendMovies.
+            movies = appendMovies(from: html, pattern: parseMoviesFallbackPattern)
         }
+        print("[parseMovies] tìm thấy \(movies.count) phim (html=\(html.count) ký tự)")
         completion(movies)
+    }
+
+    private var parseMoviesPrimaryPattern: String {
+        return "<article id=\"post-[\\s\\S]*?<a href=\"([^\"]+)\"[\\s\\S]*?<img[\\s\\S]*?src=\"([^\"]+)\"[\\s\\S]*?<span class=\"mli-eps\">(.*?)</span>[\\s\\S]*?<h2 class=\"Title\">([^<]+)</h2>"
+    }
+
+    private var parseMoviesFallbackPattern: String {
+        // Match cả <article> lẫn <div class="TPostMv"> / <li class="TPostMv"> ...
+        // Không bắt buộc có mli-eps; nếu không có sẽ để trống.
+        return "<(?:article|div|li)[^>]*?(?:TPost|post-)[\\s\\S]*?<a[^>]*?href=\"([^\"]+)\"[\\s\\S]*?<img[\\s\\S]*?(?:data-src|src)=\"([^\"]+)\"[\\s\\S]*?<h[1-3][^>]*?(?:Title|TPostTitle|entry-title)[^>]*>([^<]+)</h[1-3]>"
+    }
+
+    private func appendMovies(from html: String, pattern: String) -> [Movie] {
+        var result: [Movie] = []
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return result }
+        let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        for match in matches {
+            guard let linkRange = Range(match.range(at: 1), in: html),
+                  let imgRange = Range(match.range(at: 2), in: html) else { continue }
+            let link = String(html[linkRange])
+            let thumbUrl = String(html[imgRange])
+
+            var title = ""
+            var eps = ""
+            if match.numberOfRanges >= 5,
+               let epsRange = Range(match.range(at: 3), in: html),
+               let titleRange = Range(match.range(at: 4), in: html) {
+                eps = String(html[epsRange])
+                    .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression, range: nil)
+                title = String(html[titleRange])
+            } else if match.numberOfRanges >= 4,
+                      let titleRange = Range(match.range(at: 3), in: html) {
+                title = String(html[titleRange])
+            }
+
+            result.append(Movie(
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                link: link.hasPrefix("http") ? link : NetworkManager.shared.resolvedDomain + link,
+                thumbUrl: thumbUrl,
+                episodeStatus: eps.trimmingCharacters(in: .whitespacesAndNewlines)
+            ))
+        }
+        return result
     }
     
     func fetchEpisodes(movieUrl: String, isRecursive: Bool = false, completion: @escaping ([Episode]) -> Void) {
