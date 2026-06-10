@@ -13,7 +13,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             return UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") ?? "https://animevietsub.by"
         }
         set {
-            if newValue != resolvedDomain && newValue.hasPrefix("http") {
+            if newValue.hasPrefix("http") && UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") != newValue {
                 UserDefaults.standard.set(newValue, forKey: "AVS_ResolvedDomain")
                 print("Đã cập nhật domain mới: \\(newValue)")
             }
@@ -146,7 +146,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
     
-    private func parseMovies(html: String, completion: @escaping ([Movie]) -> Void) {
+    func parseMovies(html: String, completion: @escaping ([Movie]) -> Void) {
         var movies: [Movie] = []
         let pattern = "<article id=\"post-[\\s\\S]*?<a href=\"([^\"]+)\"[\\s\\S]*?<img[\\s\\S]*?src=\"([^\"]+)\"[\\s\\S]*?<span class=\"mli-eps\">(.*?)</span>[\\s\\S]*?<h2 class=\"Title\">([^<]+)</h2>"
         
