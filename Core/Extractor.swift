@@ -8,7 +8,7 @@ class Extractor {
         NetworkManager.shared.fetchHTML(url: episodeUrl) { html in
             
             // Tìm object PLAYER_DATA chứa thông tin luồng
-            let pattern = "window\\.PLAYER_DATA\\s*=\\s*(\\{.*?\\});"
+            let pattern = "window\\.PLAYER_DATA\\s*=\\s*(\\{[\\s\\S]*?\\});"
             guard let regex = try? NSRegularExpression(pattern: pattern),
                   let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                   let range = Range(match.range(at: 1), in: html) else {
@@ -37,14 +37,14 @@ class Extractor {
     private static func extractFromIframe(iframeUrl: String, completion: @escaping (URL?) -> Void) {
         // Trỏ NetworkManager fetch iframe URL thông qua WKWebView để bypass Cloudflare Bot Detection trên CDN
         NetworkManager.shared.fetchHTML(url: iframeUrl) { html in
-            // Tìm file m3u8 trong source của iframe
-            let pattern = "(?i)file\\s*:\\s*[\"'](https?://.*?\\.m3u8.*?)[\"']"
+            // Tìm file m3u8 trong source của iframe (dùng regex lỏng lẻo hơn để bắt cả file: "...", src="...", source: '...')
+            let pattern = "(?i)[\"'](https?://[^\"\'\\s]+?\\.m3u8[^\"\'\\s]*)[\"']"
             if let regex = try? NSRegularExpression(pattern: pattern),
                let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {
                 completion(URL(string: String(html[range])))
             } else {
-                print("Không tìm thấy m3u8 trong iframe: \(iframeUrl)")
+                print("Không tìm thấy m3u8 trong iframe: \\(iframeUrl)")
                 completion(nil)
             }
         }
