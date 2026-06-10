@@ -53,9 +53,11 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
         let vc = GenreSelectionViewController()
         if let nav = self.navigationController {
             let sheetNav = UINavigationController(rootViewController: vc)
-            if let sheet = sheetNav.sheetPresentationController {
-                sheet.detents = [.medium(), .large()]
-                sheet.prefersGrabberVisible = true
+            if #available(iOS 15.0, *) {
+                if let sheet = sheetNav.sheetPresentationController {
+                    sheet.detents = [.medium(), .large()]
+                    sheet.prefersGrabberVisible = true
+                }
             }
             vc.onApply = { [weak self] selected in
                 guard !selected.isEmpty else { return }
