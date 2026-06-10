@@ -39,7 +39,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             tabAppearance.configureWithOpaqueBackground()
             tabAppearance.backgroundColor = .systemBackground
             tabBar.tabBar.standardAppearance = tabAppearance
-            tabBar.tabBar.scrollEdgeAppearance = tabAppearance
+            // scrollEdgeAppearance trên UITabBar chỉ có từ iOS 15+
+            if #available(iOS 15.0, *) {
+                tabBar.tabBar.scrollEdgeAppearance = tabAppearance
+            }
         }
 
         window.rootViewController = tabBar
