@@ -2,6 +2,22 @@ import Foundation
 
 class Extractor {
 
+    /// Giải mã HTML entity quan trọng cho URL. JS hook chèn URL vào DOM bằng
+    /// `innerText` nên browser tự encode `&` thành `&amp;` khi serialize ra
+    /// outerHTML. Nếu không decode, AVPlayer gửi `&amp;` lên server → server
+    /// thấy query param dính vào nhau, JWT không khớp, trả 403.
+    private static func htmlDecode(_ s: String) -> String {
+        return s
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&#38;", with: "&")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#34;", with: "\"")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+    }
+
     // 1. Lấy link iframe hoặc direct link từ trang xem-phim.html
     static func resolveStream(episodeUrl: String, completion: @escaping (Stream?) -> Void) {
         // Dùng fetchHTML của NetworkManager (WKWebView) để bypass Cloudflare 403
@@ -48,7 +64,7 @@ class Extractor {
             if let regex = try? NSRegularExpression(pattern: m3u8Pattern),
                let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {
-                let raw = String(html[range]).replacingOccurrences(of: "\\/", with: "/")
+                let raw = htmlDecode(String(html[range]).replacingOccurrences(of: "\\/", with: "/"))
                 Logger.shared.log("[Extractor] Bắt được m3u8 trực tiếp trong HTML: \(raw)")
                 guard let url = URL(string: raw) else { return completion(nil) }
                 return completion(Stream(url: url, referer: defaultReferer))
@@ -59,7 +75,7 @@ class Extractor {
             if let regex = try? NSRegularExpression(pattern: iframePattern),
                let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {
-                let iframeUrl = String(html[range]).replacingOccurrences(of: "\\/", with: "/")
+                let iframeUrl = htmlDecode(String(html[range]).replacingOccurrences(of: "\\/", with: "/"))
                 Logger.shared.log("[Extractor] Tìm thấy link iframe player: \(iframeUrl)")
                 return extractFromIframe(iframeUrl: iframeUrl, completion: completion)
             }
@@ -102,7 +118,7 @@ class Extractor {
             if let regex = try? NSRegularExpression(pattern: pattern),
                let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {
-                let rawUrl = String(html[range]).replacingOccurrences(of: "\\/", with: "/")
+                let rawUrl = htmlDecode(String(html[range]).replacingOccurrences(of: "\\/", with: "/"))
                 Logger.shared.log("[Extractor] Bóc được m3u8 từ iframe: \(rawUrl)")
                 Logger.shared.log("[Extractor] Referer cho stream: \(referer)")
                 guard let url = URL(string: rawUrl) else { return completion(nil) }
