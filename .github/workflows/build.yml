@@ -31,3 +31,4 @@ jobs:
         with:
           name: AVS_iOS_App-IPA
           path: AVS_iOS_App.ipa
+          retention-days: 1
