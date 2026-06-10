@@ -146,10 +146,16 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 var path = window.location.pathname;
                 
                 var isWatchPage = path.indexOf('xem-phim.html') !== -1 || path.indexOf('-tap-') !== -1 || path.indexOf('/tap-') !== -1 || html.indexOf('PLAYER_DATA') !== -1;
-                
+
                 if (isWatchPage) {
-                    var hasWatchEps = document.querySelectorAll('.list-episode a, .episode-link, .halim-list-eps a').length > 0;
-                    return hasWatchEps || html.indexOf('.m3u8') !== -1;
+                    // Phải chờ tới khi script PLAYER_DATA hoặc link iframe/m3u8 thực sự xuất hiện
+                    // trong source, không thể chỉ dựa vào danh sách tập (vì danh sách hiển thị
+                    // ngay nhưng PLAYER_DATA mới là dữ liệu để bóc luồng phim).
+                    return html.indexOf('PLAYER_DATA') !== -1
+                        || html.indexOf('.m3u8') !== -1
+                        || html.indexOf('googleapiscdn') !== -1
+                        || html.indexOf('streamlare') !== -1
+                        || html.indexOf('hydrax') !== -1;
                 }
                 
                 var hasTPost = document.querySelectorAll('.TPost, .mli-eps, article').length > 0;
