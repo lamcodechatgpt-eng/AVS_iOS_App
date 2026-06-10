@@ -184,41 +184,58 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     autoPlayTries++;
                     if (autoPlayTries > 60) return; // ~30s
                     var path = window.location.pathname || '';
+                    var host = window.location.host || '';
+                    // Chạy trên cả trang xem AVS LẪN iframe player (host có "stream" hoặc
+                    // path có "/player/") — jwplayer trong iframe đôi khi cần click giả để
+                    // bắt đầu fetch m3u8.
                     var looksLikeWatch = path.indexOf('xem-phim') !== -1
                         || path.indexOf('-tap-') !== -1
                         || path.indexOf('/tap-') !== -1
+                        || path.indexOf('/player/') !== -1
+                        || host.indexOf('googleapiscdn') !== -1
+                        || host.indexOf('streamlare') !== -1
                         || (document.documentElement.outerHTML || '').indexOf('PLAYER_DATA') !== -1;
                     if (!looksLikeWatch) { setTimeout(autoPlay, 500); return; }
 
-                    // Đã thấy luồng — không cần click tiếp.
+                    // Đã thấy URL luồng thực sự — không cần click tiếp.
                     var topHTML = document.documentElement.outerHTML || '';
-                    if (topHTML.indexOf('.m3u8') !== -1) return;
+                    if (/[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.m3u8/i.test(topHTML)) return;
 
-                    // Bấm thử mọi candidate (nút Xem phim / play / tập đang xem).
-                    // KHÔNG dừng sau click đầu vì click có thể không trigger AJAX —
-                    // tiếp tục poll cho tới khi thấy m3u8 hoặc hết lượt.
+                    // Bấm mọi candidate (AVS button + JWPlayer overlay + thẻ video).
                     var candidates = document.querySelectorAll(
                         '#btn-film-watch, .btn-film-watch, .play-button, .video-play-button, '
-                        + '.btn-play, #btn-watch, .watch-button, .jw-icon-display, '
+                        + '.btn-play, #btn-watch, .watch-button, '
+                        + '.jw-icon-display, .jw-display-icon-container, .jw-icon-playback, '
+                        + '#player, .jwplayer, video, '
                         + '.halim-watching, a.halim-watching, .episode-active, '
                         + '.halim-btn.halim-btn-2, .episode-link, .list-episode a, '
                         + '.halim-list-eps a'
                     );
-                    for (var i = 0; i < candidates.length && i < 6; i++) {
+                    for (var i = 0; i < candidates.length && i < 10; i++) {
                         try { candidates[i].click(); } catch (e) {}
                     }
                     var video = document.querySelector('video');
                     if (video) { try { video.play(); } catch (e) {} }
+                    // JWPlayer API: nếu sẵn sàng, gọi play() trực tiếp.
+                    try {
+                        if (typeof jwplayer === 'function') {
+                            var jw = jwplayer();
+                            if (jw && typeof jw.play === 'function') jw.play(true);
+                        }
+                    } catch (e) {}
                     setTimeout(autoPlay, 500);
                 };
-                // Chỉ khởi động auto-click khi đường dẫn rõ ràng là trang xem phim.
-                // Không polling trên trang chủ / trang tìm kiếm / trang thông tin để
-                // tránh tốn CPU và làm chậm checkDOM của các trang đó.
+                // Khởi động auto-click trên cả trang xem AVS lẫn iframe player của bên thứ 3.
+                // Trang chủ/search/info bỏ qua để khỏi tốn CPU.
                 var startAutoPlayIfWatch = function() {
                     var p = window.location.pathname || '';
+                    var h = window.location.host || '';
                     if (p.indexOf('xem-phim') !== -1
                         || p.indexOf('-tap-') !== -1
-                        || p.indexOf('/tap-') !== -1) {
+                        || p.indexOf('/tap-') !== -1
+                        || p.indexOf('/player/') !== -1
+                        || h.indexOf('googleapiscdn') !== -1
+                        || h.indexOf('streamlare') !== -1) {
                         setTimeout(autoPlay, 800);
                     }
                 };
@@ -300,7 +317,15 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             let jsCheck = """
             (function() {
                 if (\(waitForIframe ? "true" : "false")) {
-                    return document.documentElement.outerHTML.indexOf('.m3u8') !== -1;
+                    var oh = document.documentElement.outerHTML;
+                    // Stricter: phải có URL m3u8 thực sự trong dấu nháy hoặc dạng file:"..."
+                    // chứ không chỉ là chuỗi con ".m3u8" (jwplayer init code có chữ này sẵn
+                    // nên indexOf trả về true ngay lập tức trước khi luồng thực sự được fetch).
+                    if (/[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.m3u8/i.test(oh)) return true;
+                    if (/file\\s*:\\s*[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.m3u8/i.test(oh)) return true;
+                    // <video src="..m3u8..."> trên iOS
+                    if (document.querySelector('video[src*=".m3u8"], source[src*=".m3u8"]')) return true;
+                    return false;
                 }
                 var html = document.documentElement.outerHTML;
                 var path = window.location.pathname;

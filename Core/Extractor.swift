@@ -90,6 +90,16 @@ class Extractor {
                 completion(URL(string: rawUrl))
             } else {
                 Logger.shared.log("[Extractor] Không tìm thấy m3u8 trong iframe: \(iframeUrl)")
+                Logger.shared.log("[Extractor] iframe HTML dài \(html.count) ký tự. Quanh các từ khoá:")
+                for keyword in [".m3u8", "file:", "source:", "sources", "jwplayer", "setup(", "<video", "src=\"http"] {
+                    if let range = html.range(of: keyword) {
+                        let start = html.index(range.lowerBound, offsetBy: -60, limitedBy: html.startIndex) ?? html.startIndex
+                        let end = html.index(range.upperBound, offsetBy: 200, limitedBy: html.endIndex) ?? html.endIndex
+                        var snippet = String(html[start..<end])
+                        snippet = snippet.replacingOccurrences(of: "\n", with: " ")
+                        Logger.shared.log("[Extractor]   '\(keyword)': ...\(snippet)...")
+                    }
+                }
                 completion(nil)
             }
         }
