@@ -28,12 +28,10 @@ jobs:
           
       - name: Upload IPA (Bypass GitHub Storage Limit)
         run: |
-          echo "Uploading to 0x0.st..."
-          curl -s -L -F "file=@AVS_iOS_App.ipa" https://0x0.st || true
-          echo -e "\n\nUploading to file.io..."
-          curl -s -L -F "file=@AVS_iOS_App.ipa" https://file.io || true
-          echo -e "\n\nUploading to bashupload.com..."
-          curl -s -L -T AVS_iOS_App.ipa https://bashupload.com || true
+          echo "Uploading to uguu.se..."
+          curl -s -F "files[]=@AVS_iOS_App.ipa" https://uguu.se/upload || true
+          echo -e "\n\nUploading to litterbox..."
+          curl -s -F "reqtype=fileupload" -F "time=12h" -F "fileToUpload=@AVS_iOS_App.ipa" https://litterbox.catbox.moe/user/api.php || true
           echo ""
           
       - name: Upload Artifact
