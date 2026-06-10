@@ -49,11 +49,13 @@ class EpisodeListViewController: UIViewController, UITableViewDataSource, UITabl
     // MARK: - UITableViewDelegate
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        let episode = episodes[indexPath.row]
-        
-        // Push PlayerController
+
+        // Push PlayerController với toàn bộ danh sách + index hiện tại để player
+        // có thể auto-chuyển tập kế tiếp và hiện episode picker overlay.
         let playerVC = PlayerController()
-        playerVC.episodeUrl = episode.link
+        playerVC.episodes = episodes
+        playerVC.currentIndex = indexPath.row
+        playerVC.episodeUrl = episodes[indexPath.row].link
         self.navigationController?.pushViewController(playerVC, animated: true)
     }
 }

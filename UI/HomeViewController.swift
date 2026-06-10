@@ -10,12 +10,99 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
         super.viewDidLoad()
         self.title = "AnimeVietsub"
         self.view.backgroundColor = .systemBackground
-        
+
+        setupNavigationBarButtons()
         setupSearchBar()
         setupCollectionView()
         setupLoadingIndicator()
-        
+
         fetchData()
+    }
+
+    private func setupNavigationBarButtons() {
+        let randomBtn = UIBarButtonItem(image: UIImage(systemName: "shuffle"),
+                                        style: .plain,
+                                        target: self,
+                                        action: #selector(openRandomMovie))
+        let genreBtn = UIBarButtonItem(image: UIImage(systemName: "square.grid.2x2"),
+                                       style: .plain,
+                                       target: self,
+                                       action: #selector(openGenrePicker))
+        navigationItem.rightBarButtonItems = [randomBtn, genreBtn]
+    }
+
+    @objc private func openRandomMovie() {
+        guard !movies.isEmpty else { return }
+        let pick = movies.randomElement()!
+        Logger.shared.log("[Random] Mở phim ngẫu nhiên: \(pick.title)")
+        let episodeVC = EpisodeListViewController()
+        episodeVC.movie = pick
+        self.navigationController?.pushViewController(episodeVC, animated: true)
+    }
+
+    @objc private func openGenrePicker() {
+        // Trích genre slug từ link <a href="/the-loai/...">. Parse từ HTML home.
+        let alert = UIAlertController(title: "Đang tải thể loại...", message: nil, preferredStyle: .actionSheet)
+        present(alert, animated: true)
+
+        NetworkManager.shared.fetchHTML(url: NetworkManager.shared.resolvedDomain) { [weak self] html in
+            let genres = Self.parseGenres(from: html)
+            DispatchQueue.main.async {
+                alert.dismiss(animated: true) {
+                    self?.presentGenreList(genres)
+                }
+            }
+        }
+    }
+
+    private func presentGenreList(_ genres: [(name: String, slug: String)]) {
+        let sheet = UIAlertController(title: "Thể loại", message: nil, preferredStyle: .actionSheet)
+        for g in genres.prefix(20) {
+            sheet.addAction(UIAlertAction(title: g.name, style: .default) { [weak self] _ in
+                self?.loadGenre(slug: g.slug, name: g.name)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Đóng", style: .cancel))
+        if let pop = sheet.popoverPresentationController {
+            pop.barButtonItem = navigationItem.rightBarButtonItems?.last
+        }
+        present(sheet, animated: true)
+    }
+
+    private func loadGenre(slug: String, name: String) {
+        title = "Thể loại: \(name)"
+        activityIndicator.startAnimating()
+        collectionView.isHidden = true
+        let url = "\(NetworkManager.shared.resolvedDomain)/the-loai/\(slug)/"
+        Logger.shared.log("[Genre] Load \(url)")
+        NetworkManager.shared.fetchHTML(url: url) { [weak self] html in
+            NetworkManager.shared.parseMovies(html: html) { fetched in
+                Logger.shared.log("[Genre] kết quả: \(fetched.count) phim")
+                self?.movies = fetched
+                self?.activityIndicator.stopAnimating()
+                self?.collectionView.isHidden = false
+                self?.collectionView.reloadData()
+            }
+        }
+    }
+
+    /// Bóc danh sách genre từ trang chủ. AVS link kiểu /the-loai/hanh-dong/.
+    private static func parseGenres(from html: String) -> [(name: String, slug: String)] {
+        let pattern = "(?i)<a[^>]*?href=\"[^\"]*?/the-loai/([a-z0-9-]+)/?\"[^>]*>([^<]{2,40})</a>"
+        var result: [(String, String)] = []
+        var seen = Set<String>()
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return [] }
+        let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        for m in matches {
+            guard let slugRange = Range(m.range(at: 1), in: html),
+                  let nameRange = Range(m.range(at: 2), in: html) else { continue }
+            let slug = String(html[slugRange])
+            let name = String(html[nameRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if seen.contains(slug) || name.isEmpty { continue }
+            seen.insert(slug)
+            result.append((name, slug))
+        }
+        return result
     }
     
     private func setupSearchBar() {
@@ -67,25 +154,34 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
     }
     
     private func fixKeyword(_ str: String) -> String {
-        var newStr = str.lowercased()
+        // Fold dấu trước (Bộ Đôi → Bo Doi) vì URL search của AVS không hỗ trợ dấu.
+        let folded = str
+            .folding(options: .diacriticInsensitive, locale: Locale(identifier: "vi_VN"))
+            // Đ/đ folding diacriticInsensitive không xử lý, replace tay.
+            .replacingOccurrences(of: "đ", with: "d")
+            .replacingOccurrences(of: "Đ", with: "D")
+            .lowercased()
         let charsToRemove = "<>`~!@#$%^&*()_|=?;:'\",.{}[]\\/"
-        newStr.removeAll { charsToRemove.contains($0) }
-        return newStr.components(separatedBy: .whitespacesAndNewlines)
+        var clean = folded
+        clean.removeAll { charsToRemove.contains($0) }
+        return clean.components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: "+")
     }
-    
+
     // MARK: - Search
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
         guard let text = searchBar.text, !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         let keyword = fixKeyword(text)
         let searchUrl = "\(NetworkManager.shared.resolvedDomain)/tim-kiem/\(keyword)/"
-        
+        Logger.shared.log("[Search] keyword='\(text)' → '\(keyword)' → \(searchUrl)")
+
         activityIndicator.startAnimating()
         collectionView.isHidden = true
-        
+
         NetworkManager.shared.fetchHTML(url: searchUrl) { [weak self] html in
             NetworkManager.shared.parseMovies(html: html) { fetchedMovies in
+                Logger.shared.log("[Search] kết quả: \(fetchedMovies.count) phim")
                 self?.movies = fetchedMovies
                 self?.activityIndicator.stopAnimating()
                 self?.collectionView.isHidden = false

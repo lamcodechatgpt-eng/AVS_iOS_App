@@ -3,6 +3,8 @@ import AVKit
 
 class PlayerController: UIViewController {
     var episodeUrl: String! // Truyền link tập phim từ UI vào đây
+    var episodes: [Episode] = []        // Toàn bộ danh sách tập của phim hiện tại
+    var currentIndex: Int = 0           // Vị trí tập đang phát trong `episodes`
 
     private let activityIndicator = UIActivityIndicatorView(style: .large)
     private let statusLabel = UILabel()
@@ -10,11 +12,21 @@ class PlayerController: UIViewController {
     private let copyButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
 
+    // Overlay điều khiển
+    private let skipBackwardButton = UIButton(type: .system)
+    private let skipForwardButton = UIButton(type: .system)
+    private let skipIntroButton = UIButton(type: .system)
+    private let episodePickerButton = UIButton(type: .system)
+    private let nextEpisodeButton = UIButton(type: .system)
+    private weak var currentPlayer: AVPlayer?
+    private weak var currentPlayerVC: AVPlayerViewController?
+
     private var statusObservation: NSKeyValueObservation?
     private var errorObserver: NSObjectProtocol?
     private var stallObserver: NSObjectProtocol?
     private var accessLogObserver: NSObjectProtocol?
     private var errorLogObserver: NSObjectProtocol?
+    private var endObserver: NSObjectProtocol?
     private var diagTimer: Timer?
     private var m3u8Loader: M3U8ResourceLoader?
     private weak var currentPlayerItem: AVPlayerItem?
@@ -24,6 +36,7 @@ class PlayerController: UIViewController {
         view.backgroundColor = .black
 
         setupLoadingUI()
+        setupOverlayControls()
         startResolve()
     }
 
@@ -35,6 +48,7 @@ class PlayerController: UIViewController {
         if let o = stallObserver { NotificationCenter.default.removeObserver(o) }
         if let o = accessLogObserver { NotificationCenter.default.removeObserver(o) }
         if let o = errorLogObserver { NotificationCenter.default.removeObserver(o) }
+        if let o = endObserver { NotificationCenter.default.removeObserver(o) }
     }
 
     private var resolveStartTime: Date?
@@ -207,6 +221,15 @@ class PlayerController: UIViewController {
             Logger.shared.log("[ErrorLog] URI=\(last.uri ?? "?") status=\(last.errorStatusCode) domain=\(last.errorDomain) comment=\(last.errorComment ?? "?")")
         }
 
+        // Auto-next: khi item phát hết, nhảy sang tập tiếp theo (nếu còn).
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            self?.playNextEpisodeIfAvailable()
+        }
+
         // Dump state mỗi 2s trong 12s đầu — không cần KVO trên mỗi property riêng.
         let startedAt = Date()
         diagTimer?.invalidate()
@@ -224,6 +247,8 @@ class PlayerController: UIViewController {
         let player = AVPlayer(playerItem: item)
         let playerVC = AVPlayerViewController()
         playerVC.player = player
+        currentPlayer = player
+        currentPlayerVC = playerVC
 
         addChild(playerVC)
         playerVC.view.frame = view.bounds
@@ -235,6 +260,9 @@ class PlayerController: UIViewController {
         logTextView.isHidden = true
         copyButton.isHidden = true
         retryButton.isHidden = true
+
+        // Đem overlay buttons lên trên player view và bật hiển thị.
+        showOverlayControls(true)
 
         player.play()
     }
@@ -348,6 +376,7 @@ class PlayerController: UIViewController {
         if let o = stallObserver { NotificationCenter.default.removeObserver(o); stallObserver = nil }
         if let o = accessLogObserver { NotificationCenter.default.removeObserver(o); accessLogObserver = nil }
         if let o = errorLogObserver { NotificationCenter.default.removeObserver(o); errorLogObserver = nil }
+        if let o = endObserver { NotificationCenter.default.removeObserver(o); endObserver = nil }
         for child in children {
             child.willMove(toParent: nil)
             child.view.removeFromSuperview()
@@ -355,5 +384,113 @@ class PlayerController: UIViewController {
         }
         Logger.shared.clear()
         startResolve()
+    }
+
+    // MARK: - Overlay controls (skip / next / episode picker)
+
+    private func setupOverlayControls() {
+        // Cụm nút giữa: -10s, +10s, +90s (skip intro).
+        let buttons: [(UIButton, String, Selector)] = [
+            (skipBackwardButton, "⟲ 10", #selector(skipBackward)),
+            (skipForwardButton, "10 ⟳", #selector(skipForward)),
+            (skipIntroButton, "+1:30", #selector(skipIntro))
+        ]
+        for (btn, title, sel) in buttons {
+            configureOverlayButton(btn, title: title, action: sel)
+        }
+        configureOverlayButton(episodePickerButton, title: "📺", action: #selector(showEpisodePicker))
+        configureOverlayButton(nextEpisodeButton, title: "Tập sau ▶", action: #selector(skipToNextEpisode))
+
+        let centerStack = UIStackView(arrangedSubviews: [skipBackwardButton, skipIntroButton, skipForwardButton])
+        centerStack.axis = .horizontal
+        centerStack.spacing = 12
+        centerStack.distribution = .fillEqually
+        centerStack.translatesAutoresizingMaskIntoConstraints = false
+        centerStack.isHidden = true
+        view.addSubview(centerStack)
+
+        let topStack = UIStackView(arrangedSubviews: [episodePickerButton, nextEpisodeButton])
+        topStack.axis = .horizontal
+        topStack.spacing = 8
+        topStack.translatesAutoresizingMaskIntoConstraints = false
+        topStack.isHidden = true
+        view.addSubview(topStack)
+
+        NSLayoutConstraint.activate([
+            centerStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            centerStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -80),
+            topStack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            topStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12)
+        ])
+
+        overlayStacks = [centerStack, topStack]
+    }
+
+    private var overlayStacks: [UIStackView] = []
+
+    private func configureOverlayButton(_ btn: UIButton, title: String, action: Selector) {
+        btn.setTitle(title, for: .normal)
+        btn.setTitleColor(.white, for: .normal)
+        btn.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+        btn.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        btn.layer.cornerRadius = 8
+        btn.contentEdgeInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+        btn.addTarget(self, action: action, for: .touchUpInside)
+    }
+
+    private func showOverlayControls(_ show: Bool) {
+        overlayStacks.forEach { $0.isHidden = !show }
+        overlayStacks.forEach { view.bringSubviewToFront($0) }
+        // Ẩn nút "Tập sau" nếu đã ở tập cuối.
+        nextEpisodeButton.isHidden = !(show && currentIndex + 1 < episodes.count)
+        episodePickerButton.isHidden = !(show && episodes.count > 1)
+    }
+
+    @objc private func skipBackward() { seek(by: -10) }
+    @objc private func skipForward()  { seek(by:  10) }
+    @objc private func skipIntro()    { seek(by:  90) }
+
+    private func seek(by seconds: Double) {
+        guard let player = currentPlayer else { return }
+        let current = CMTimeGetSeconds(player.currentTime())
+        guard current.isFinite else { return }
+        let target = max(0, current + seconds)
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
+    }
+
+    @objc private func skipToNextEpisode() {
+        playNextEpisodeIfAvailable()
+    }
+
+    private func playNextEpisodeIfAvailable() {
+        let next = currentIndex + 1
+        guard next < episodes.count else {
+            Logger.shared.log("[PlayerController] Đã hết phim — không còn tập tiếp theo.")
+            return
+        }
+        Logger.shared.log("[PlayerController] Auto-next → tập \(next + 1)/\(episodes.count)")
+        currentIndex = next
+        episodeUrl = episodes[next].link
+        retry()
+    }
+
+    @objc private func showEpisodePicker() {
+        guard !episodes.isEmpty else { return }
+        let alert = UIAlertController(title: "Chọn tập", message: nil, preferredStyle: .actionSheet)
+        for (idx, ep) in episodes.enumerated() {
+            let title = idx == currentIndex ? "▶ \(ep.title)" : ep.title
+            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                guard let self = self, idx != self.currentIndex else { return }
+                self.currentIndex = idx
+                self.episodeUrl = ep.link
+                self.retry()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Đóng", style: .cancel))
+        if let pop = alert.popoverPresentationController {
+            pop.sourceView = episodePickerButton
+            pop.sourceRect = episodePickerButton.bounds
+        }
+        present(alert, animated: true)
     }
 }
