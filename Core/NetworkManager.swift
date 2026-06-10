@@ -550,13 +550,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 var phimLinkCount = document.querySelectorAll('a[href*="/phim/"]').length;
                 var hasMovieCards = cardCount > 0 || phimLinkCount >= 6;
 
-                var isListLike = path === '/' || path === ''
-                    || path.indexOf('/phim') === 0
-                    || path.indexOf('/tim-kiem') === 0
-                    || path.indexOf('/the-loai') === 0
-                    || html.indexOf('TPostMv') !== -1
-                    || html.indexOf('MovieList') !== -1;
-                var isHome = isListLike && hasMovieCards;
+                var isHome = hasMovieCards;
 
                 var isInfo = html.indexOf('MovieInfo') !== -1 || html.indexOf('MvTbCn') !== -1;
 
@@ -610,43 +604,35 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
 
-    /// Fetch home page + /phim-moi/ trang 1+2 song song, dedupe → trả 1 list lớn (~60 phim).
+    /// Fetch home page + /phim-moi/ trang 1+2 tuần tự để không bị hủy request trên WKWebView chung.
     private func fetchHomePlusLatest(completion: @escaping ([Movie]) -> Void) {
-        let group = DispatchGroup()
         var homeMovies: [Movie] = []
         var page1Movies: [Movie] = []
         var page2Movies: [Movie] = []
 
-        group.enter()
-        tryHomeFromDomains([resolvedDomain] + knownDomains.filter { $0 != resolvedDomain }) { movies in
+        tryHomeFromDomains([resolvedDomain] + knownDomains.filter { $0 != resolvedDomain }) { [weak self] movies in
             homeMovies = movies
-            group.leave()
-        }
-
-        group.enter()
-        fetchHTML(url: "\(resolvedDomain)/phim-moi/page/1/") { html in
-            self.parseMovies(html: html) { m in
-                page1Movies = m
-                group.leave()
+            guard let self = self else { return }
+            
+            self.fetchHTML(url: "\(self.resolvedDomain)/phim-moi/page/1/") { html1 in
+                self.parseMovies(html: html1) { m1 in
+                    page1Movies = m1
+                    
+                    self.fetchHTML(url: "\(self.resolvedDomain)/phim-moi/page/2/") { html2 in
+                        self.parseMovies(html: html2) { m2 in
+                            page2Movies = m2
+                            
+                            var seen = Set<String>()
+                            var combined: [Movie] = []
+                            for m in homeMovies + page1Movies + page2Movies where seen.insert(m.link).inserted {
+                                combined.append(m)
+                            }
+                            Logger.shared.log("[Home] home=\(homeMovies.count) + page1=\(page1Movies.count) + page2=\(page2Movies.count) → \(combined.count) phim sau dedupe")
+                            completion(combined)
+                        }
+                    }
+                }
             }
-        }
-
-        group.enter()
-        fetchHTML(url: "\(resolvedDomain)/phim-moi/page/2/") { html in
-            self.parseMovies(html: html) { m in
-                page2Movies = m
-                group.leave()
-            }
-        }
-
-        group.notify(queue: .main) {
-            var seen = Set<String>()
-            var combined: [Movie] = []
-            for m in homeMovies + page1Movies + page2Movies where seen.insert(m.link).inserted {
-                combined.append(m)
-            }
-            Logger.shared.log("[Home] home=\(homeMovies.count) + page1=\(page1Movies.count) + page2=\(page2Movies.count) → \(combined.count) phim sau dedupe")
-            completion(combined)
         }
     }
 
