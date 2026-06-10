@@ -81,14 +81,6 @@ class PlayerController: UIViewController {
     /// Giữ lại để debug khi cần: gửi HEAD thử URL với header để xem server trả status nào.
     /// Không gọi mặc định vì sẽ làm tăng rate-limit counter và khiến AVPlayer dính 429.
     private func preflightAndAttach(stream: Stream) {
-            }
-        }
-    }
-
-    /// Gửi HEAD request tới m3u8 trước khi giao cho AVPlayer để xác minh server thực sự
-    /// chấp nhận. Nếu trả 403/404 thì rõ ràng Referer/cookie/expiry là vấn đề; nếu 200
-    /// nhưng AVPlayer vẫn fail thì lỗi là codec / HLS variant / format.
-    private func preflightAndAttach(stream: Stream) {
         var req = URLRequest(url: stream.url)
         req.httpMethod = "HEAD"
         req.timeoutInterval = 5
