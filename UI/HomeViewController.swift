@@ -50,49 +50,55 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
     }
 
     @objc private func openGenrePicker() {
-        // Trích genre slug từ link <a href="/the-loai/...">. Parse từ HTML home.
-        let alert = UIAlertController(title: "Đang tải thể loại...", message: nil, preferredStyle: .actionSheet)
-        present(alert, animated: true)
+        let vc = GenreSelectionViewController()
+        if let nav = self.navigationController {
+            let sheetNav = UINavigationController(rootViewController: vc)
+            if let sheet = sheetNav.sheetPresentationController {
+                sheet.detents = [.medium(), .large()]
+                sheet.prefersGrabberVisible = true
+            }
+            vc.onApply = { [weak self] selected in
+                guard !selected.isEmpty else { return }
+                self?.loadMultipleGenres(selected)
+            }
+            nav.present(sheetNav, animated: true)
+        }
+    }
 
-        NetworkManager.shared.fetchHTML(url: NetworkManager.shared.resolvedDomain) { [weak self] html in
-            let genres = Self.parseGenres(from: html)
-            DispatchQueue.main.async {
-                alert.dismiss(animated: true) {
-                    self?.presentGenreList(genres)
+    private func loadMultipleGenres(_ genres: [(name: String, slug: String)]) {
+        let names = genres.map { $0.name }.joined(separator: ", ")
+        title = "Thể loại: \(names)"
+        activityIndicator.startAnimating()
+        collectionView.isHidden = true
+        
+        var allFetchedMovies: [Movie] = []
+        var remainingSlugs = genres.map { $0.slug }
+        
+        func fetchNext() {
+            guard let slug = remainingSlugs.first else {
+                // Done fetching all
+                Logger.shared.log("[Genre] Tổng kết quả: \(allFetchedMovies.count) phim từ nhiều thể loại")
+                var seen = Set<String>()
+                let uniqueMovies = allFetchedMovies.filter { seen.insert($0.link).inserted }
+                
+                self.movies = uniqueMovies
+                self.activityIndicator.stopAnimating()
+                self.collectionView.isHidden = false
+                self.collectionView.reloadData()
+                return
+            }
+            remainingSlugs.removeFirst()
+            
+            let url = "\(NetworkManager.shared.resolvedDomain)/the-loai/\(slug)/"
+            Logger.shared.log("[Genre] Load \(url)")
+            NetworkManager.shared.fetchHTML(url: url) { [weak self] html in
+                NetworkManager.shared.parseMovies(html: html) { fetched in
+                    allFetchedMovies.append(contentsOf: fetched)
+                    fetchNext()
                 }
             }
         }
-    }
-
-    private func presentGenreList(_ genres: [(name: String, slug: String)]) {
-        let sheet = UIAlertController(title: "Thể loại", message: nil, preferredStyle: .actionSheet)
-        for g in genres.prefix(20) {
-            sheet.addAction(UIAlertAction(title: g.name, style: .default) { [weak self] _ in
-                self?.loadGenre(slug: g.slug, name: g.name)
-            })
-        }
-        sheet.addAction(UIAlertAction(title: "Đóng", style: .cancel))
-        if let pop = sheet.popoverPresentationController {
-            pop.barButtonItem = navigationItem.rightBarButtonItems?.last
-        }
-        present(sheet, animated: true)
-    }
-
-    private func loadGenre(slug: String, name: String) {
-        title = "Thể loại: \(name)"
-        activityIndicator.startAnimating()
-        collectionView.isHidden = true
-        let url = "\(NetworkManager.shared.resolvedDomain)/the-loai/\(slug)/"
-        Logger.shared.log("[Genre] Load \(url)")
-        NetworkManager.shared.fetchHTML(url: url) { [weak self] html in
-            NetworkManager.shared.parseMovies(html: html) { fetched in
-                Logger.shared.log("[Genre] kết quả: \(fetched.count) phim")
-                self?.movies = fetched
-                self?.activityIndicator.stopAnimating()
-                self?.collectionView.isHidden = false
-                self?.collectionView.reloadData()
-            }
-        }
+        fetchNext()
     }
 
     /// Bóc danh sách genre từ trang chủ. AVS link kiểu /the-loai/hanh-dong/.
@@ -363,19 +369,20 @@ class MovieCell: UICollectionViewCell {
     let imageView = UIImageView()
     let titleLabel = UILabel()
     let epsLabel = UILabel()
+    let epsBackground = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
     let gradientLayer = CAGradientLayer()
     private var currentImageTask: URLSessionDataTask?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .secondarySystemBackground
-        contentView.layer.cornerRadius = 12
+        contentView.layer.cornerRadius = 14
         contentView.clipsToBounds = true
-        // Shadow trên cell (không clip để render được)
+        
         layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.22
-        layer.shadowRadius = 6
-        layer.shadowOffset = CGSize(width: 0, height: 3)
+        layer.shadowOpacity = 0.25
+        layer.shadowRadius = 8
+        layer.shadowOffset = CGSize(width: 0, height: 4)
         layer.masksToBounds = false
 
         imageView.contentMode = .scaleAspectFill
@@ -383,30 +390,32 @@ class MovieCell: UICollectionViewCell {
         imageView.backgroundColor = .tertiarySystemFill
         imageView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Gradient từ trong suốt → đen ở dưới poster để text dễ đọc.
         gradientLayer.colors = [
             UIColor.clear.cgColor,
-            UIColor.black.withAlphaComponent(0.85).cgColor
+            UIColor.black.withAlphaComponent(0.9).cgColor
         ]
-        gradientLayer.locations = [0.55, 1.0]
+        gradientLayer.locations = [0.5, 1.0]
 
-        titleLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .bold)
         titleLabel.textColor = .white
         titleLabel.numberOfLines = 2
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        epsLabel.font = .systemFont(ofSize: 10, weight: .bold)
+        epsLabel.font = .systemFont(ofSize: 11, weight: .heavy)
         epsLabel.textColor = .white
-        epsLabel.backgroundColor = UIColor.systemRed.withAlphaComponent(0.95)
-        epsLabel.layer.cornerRadius = 6
-        epsLabel.clipsToBounds = true
         epsLabel.textAlignment = .center
         epsLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        epsBackground.layer.cornerRadius = 8
+        epsBackground.clipsToBounds = true
+        epsBackground.translatesAutoresizingMaskIntoConstraints = false
 
         contentView.addSubview(imageView)
         imageView.layer.addSublayer(gradientLayer)
         contentView.addSubview(titleLabel)
-        contentView.addSubview(epsLabel)
+        
+        contentView.addSubview(epsBackground)
+        epsBackground.contentView.addSubview(epsLabel)
 
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
@@ -414,13 +423,17 @@ class MovieCell: UICollectionViewCell {
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
 
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
-            titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 10),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10),
+            titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10),
 
-            epsLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
-            epsLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
-            epsLabel.heightAnchor.constraint(equalToConstant: 20)
+            epsBackground.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            epsBackground.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            epsBackground.heightAnchor.constraint(equalToConstant: 22),
+            
+            epsLabel.leadingAnchor.constraint(equalTo: epsBackground.contentView.leadingAnchor, constant: 6),
+            epsLabel.trailingAnchor.constraint(equalTo: epsBackground.contentView.trailingAnchor, constant: -6),
+            epsLabel.centerYAnchor.constraint(equalTo: epsBackground.contentView.centerYAnchor)
         ])
     }
 
@@ -437,17 +450,17 @@ class MovieCell: UICollectionViewCell {
         imageView.image = nil
         titleLabel.text = nil
         epsLabel.text = nil
-        epsLabel.isHidden = true
+        epsBackground.isHidden = true
     }
 
     func configure(with movie: Movie) {
         titleLabel.text = movie.title
         let trimmed = movie.episodeStatus.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            epsLabel.isHidden = true
+            epsBackground.isHidden = true
         } else {
-            epsLabel.isHidden = false
-            epsLabel.text = "  \(trimmed)  "
+            epsBackground.isHidden = false
+            epsLabel.text = trimmed
         }
         if let url = URL(string: movie.thumbUrl) {
             currentImageTask = ImageLoader.shared.load(url, into: imageView)

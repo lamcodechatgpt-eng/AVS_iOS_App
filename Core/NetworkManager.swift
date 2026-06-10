@@ -306,7 +306,11 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             self.currentLoadId += 1
             let loadId = self.currentLoadId
 
-            self.completionQueue.removeAll() // Hủy các request cũ đang bị kẹt
+            // Trả về chuỗi rỗng cho các request cũ để tránh bị treo (hang) UI
+            for oldCompletion in self.completionQueue {
+                oldCompletion("")
+            }
+            self.completionQueue.removeAll()
             self.completionQueue.append(completion)
 
             if let targetUrl = URL(string: url) {
