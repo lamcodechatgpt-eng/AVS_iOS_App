@@ -646,6 +646,13 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
 
+    /// Lấy 1 trang /phim-moi/page/N/ (dùng cho infinite scroll).
+    func fetchMoviesPage(_ page: Int, completion: @escaping ([Movie]) -> Void) {
+        fetchHTML(url: "\(resolvedDomain)/phim-moi/page/\(page)/") { html in
+            self.parseMovies(html: html, completion: completion)
+        }
+    }
+
     private func tryHomeFromDomains(_ domains: [String], completion: @escaping ([Movie]) -> Void) {
         guard let first = domains.first else {
             // Cạn danh sách → fallback cuối qua bit.ly

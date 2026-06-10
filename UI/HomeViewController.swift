@@ -6,6 +6,11 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
     var movies: [Movie] = []
     let activityIndicator = UIActivityIndicatorView(style: .large)
 
+    // Infinite scroll state
+    private var currentPage = 2          // home + page 1 + page 2 đã load sẵn
+    private var isLoadingMore = false
+    private var hasMore = true
+
     // Live search
     private let suggestionsVC = SearchSuggestionsViewController()
     private var suggestSearchWork: DispatchWorkItem?
@@ -170,6 +175,7 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
         layout.minimumInteritemSpacing = interItem
         layout.sectionInset = UIEdgeInsets(top: 4, left: sideInset, bottom: 24, right: sideInset)
         layout.headerReferenceSize = CGSize(width: view.bounds.width, height: 48)
+        layout.footerReferenceSize = CGSize(width: view.bounds.width, height: 60)
 
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -181,6 +187,9 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
         collectionView.register(SectionHeaderView.self,
                                 forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
                                 withReuseIdentifier: "Header")
+        collectionView.register(LoadMoreFooterView.self,
+                                forSupplementaryViewOfKind: UICollectionView.elementKindSectionFooter,
+                                withReuseIdentifier: "Footer")
 
         // Pull to refresh
         let refresh = UIRefreshControl()
@@ -194,14 +203,83 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
     @objc private func pullToRefresh() {
         // Xoá cache home để fetch lại.
         DiskCache.shared.remove("home")
+        // Reset infinite scroll
+        currentPage = 2
+        hasMore = true
+        isLoadingMore = false
         fetchData()
     }
 
-    // Section header với title
+    // Section header với title, footer với loading state
     func collectionView(_ cv: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
+        if kind == UICollectionView.elementKindSectionFooter {
+            let f = cv.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "Footer", for: indexPath) as! LoadMoreFooterView
+            if isLoadingMore {
+                f.show(state: .loading)
+            } else if !hasMore {
+                f.show(state: .done)
+            } else {
+                f.show(state: .idle)
+            }
+            return f
+        }
         let h = cv.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "Header", for: indexPath) as! SectionHeaderView
         h.titleLabel.text = movies.isEmpty ? "Đang tải..." : "🔥 Mới cập nhật (\(movies.count) phim)"
         return h
+    }
+
+    // Infinite scroll: khi user thấy item cách cuối ≤ 6 → load page kế.
+    func collectionView(_ cv: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        guard hasMore, !isLoadingMore, !movies.isEmpty else { return }
+        let triggerIndex = movies.count - 6
+        if indexPath.row >= triggerIndex {
+            loadMore()
+        }
+    }
+
+    private func loadMore() {
+        isLoadingMore = true
+        let nextPage = currentPage + 1
+        reloadFooter()
+        Logger.shared.log("[InfiniteScroll] Loading page \(nextPage) (đã có \(movies.count) phim)")
+        NetworkManager.shared.fetchMoviesPage(nextPage) { [weak self] new in
+            guard let self = self else { return }
+            if new.isEmpty {
+                self.hasMore = false
+                self.isLoadingMore = false
+                self.reloadFooter()
+                Logger.shared.log("[InfiniteScroll] Page \(nextPage) rỗng — đã hết phim")
+                return
+            }
+            var seen = Set(self.movies.map { $0.link })
+            let fresh = new.filter { seen.insert($0.link).inserted }
+            if fresh.isEmpty {
+                // Toàn dup → server đã wrap về đầu hoặc hết content thật sự.
+                self.hasMore = false
+                Logger.shared.log("[InfiniteScroll] Page \(nextPage) toàn dup → dừng infinite scroll")
+            } else {
+                let startIndex = self.movies.count
+                self.movies.append(contentsOf: fresh)
+                self.currentPage = nextPage
+                Logger.shared.log("[InfiniteScroll] Page \(nextPage) thêm \(fresh.count) phim mới (tổng \(self.movies.count))")
+                // Chỉ insert items mới thay vì reloadData → giữ scroll vị trí.
+                let paths = (startIndex..<self.movies.count).map { IndexPath(item: $0, section: 0) }
+                self.collectionView.performBatchUpdates {
+                    self.collectionView.insertItems(at: paths)
+                }
+            }
+            self.isLoadingMore = false
+            self.reloadFooter()
+        }
+    }
+
+    private func reloadFooter() {
+        if let footer = collectionView.supplementaryView(forElementKind: UICollectionView.elementKindSectionFooter,
+                                                         at: IndexPath(item: 0, section: 0)) as? LoadMoreFooterView {
+            if isLoadingMore { footer.show(state: .loading) }
+            else if !hasMore { footer.show(state: .done) }
+            else { footer.show(state: .idle) }
+        }
     }
     
     private func fetchData() {
@@ -395,4 +473,48 @@ final class SectionHeaderView: UICollectionReusableView {
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
+}
+
+// MARK: - Footer hiển thị "đang tải / đã hết / idle" cho infinite scroll
+
+final class LoadMoreFooterView: UICollectionReusableView {
+    enum State { case idle, loading, done }
+
+    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let label = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(spinner)
+
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
+            spinner.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            label.topAnchor.constraint(equalTo: spinner.bottomAnchor, constant: 6),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16)
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func show(state: State) {
+        switch state {
+        case .idle:
+            spinner.stopAnimating()
+            label.text = nil
+        case .loading:
+            spinner.startAnimating()
+            label.text = "Đang tải thêm phim..."
+        case .done:
+            spinner.stopAnimating()
+            label.text = "🎬 Đã hết phim"
+        }
+    }
 }
