@@ -164,6 +164,17 @@ class Extractor {
         let fileURL = tmpDir.appendingPathComponent("avs-\(Int(Date().timeIntervalSince1970)).m3u8")
         do {
             try data.write(to: fileURL, options: .atomic)
+            // Log nội dung m3u8 đã decode để xác minh format đúng và đếm segment.
+            if let text = String(data: data, encoding: .utf8) {
+                let segmentLines = text.split(separator: "\n").filter { $0.hasPrefix("http") }
+                Logger.shared.log("[Extractor] M3U8 decoded \(data.count) bytes, \(segmentLines.count) segments")
+                Logger.shared.log("[Extractor] M3U8 đầu file: \(text.prefix(300))")
+                if let firstSeg = segmentLines.first {
+                    Logger.shared.log("[Extractor] Segment đầu: \(firstSeg.prefix(180))")
+                }
+            } else {
+                Logger.shared.log("[Extractor] CẢNH BÁO: m3u8 không decode UTF-8 được — có thể base64 sai.")
+            }
             return fileURL
         } catch {
             Logger.shared.log("[Extractor] Ghi tmp m3u8 thất bại: \(error.localizedDescription)")

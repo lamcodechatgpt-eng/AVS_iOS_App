@@ -13,6 +13,9 @@ class PlayerController: UIViewController {
     private var statusObservation: NSKeyValueObservation?
     private var errorObserver: NSObjectProtocol?
     private var stallObserver: NSObjectProtocol?
+    private var accessLogObserver: NSObjectProtocol?
+    private var errorLogObserver: NSObjectProtocol?
+    private var diagTimer: Timer?
     private weak var currentPlayerItem: AVPlayerItem?
 
     override func viewDidLoad() {
@@ -25,9 +28,12 @@ class PlayerController: UIViewController {
 
     deinit {
         phaseTimer?.invalidate()
+        diagTimer?.invalidate()
         statusObservation?.invalidate()
         if let o = errorObserver { NotificationCenter.default.removeObserver(o) }
         if let o = stallObserver { NotificationCenter.default.removeObserver(o) }
+        if let o = accessLogObserver { NotificationCenter.default.removeObserver(o) }
+        if let o = errorLogObserver { NotificationCenter.default.removeObserver(o) }
     }
 
     private var resolveStartTime: Date?
@@ -113,15 +119,23 @@ class PlayerController: UIViewController {
     }
 
     private func attachPlayer(for stream: Stream) {
-        // Một số server stream từ chối khi thiếu Referer / User-Agent. AVPlayer mặc định
-        // không gửi Referer nên hiện logo gạch chéo. Truyền tay qua AVURLAsset.
-        let headers: [String: String] = [
-            "Referer": stream.referer,
-            "Origin": String(stream.referer.dropLast()), // bỏ '/' cuối để thành origin
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
-        ]
-        // Key "AVURLAssetHTTPHeaderFieldsKey" là private nhưng được dùng rộng rãi.
-        let asset = AVURLAsset(url: stream.url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        // Khi luồng đến từ file:// (đã decode data URL), KHÔNG set Referer/UA —
+        // những header này áp xuống tất cả segment requests và Google Photos đôi khi
+        // trả khác nhau tuỳ Referer. Để rỗng cho an toàn.
+        let isLocalFile = stream.url.isFileURL
+        let assetOptions: [String: Any]
+        if isLocalFile {
+            assetOptions = [:]
+            Logger.shared.log("[PlayerController] Local file URL — không gắn HTTP headers")
+        } else {
+            let headers: [String: String] = [
+                "Referer": stream.referer,
+                "Origin": String(stream.referer.dropLast()),
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+            ]
+            assetOptions = ["AVURLAssetHTTPHeaderFieldsKey": headers]
+        }
+        let asset = AVURLAsset(url: stream.url, options: assetOptions)
         let item = AVPlayerItem(asset: asset)
         currentPlayerItem = item
 
@@ -161,6 +175,43 @@ class PlayerController: UIViewController {
             queue: .main
         ) { _ in
             Logger.shared.log("[PlayerController] Playback stalled")
+        }
+
+        // Access log: mỗi segment HTTP fetch sẽ thêm 1 entry. Đếm để biết AVPlayer
+        // có thực sự pull video data hay chỉ ngồi yên.
+        accessLogObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.newAccessLogEntryNotification,
+            object: item,
+            queue: .main
+        ) { _ in
+            guard let log = item.accessLog(), let last = log.events.last else { return }
+            Logger.shared.log("[AccessLog] URI=\(last.uri ?? "?") served=\(last.numberOfBytesTransferred) bytes mediaRequests=\(last.numberOfMediaRequests) avgBitrate=\(Int(last.indicatedBitrate))")
+        }
+
+        // Error log: mỗi segment thất bại sẽ có 1 entry với mã lỗi cụ thể (HTTP code,
+        // network error). Đây là chìa khoá biết Google Photos có chặn / segment có
+        // phải định dạng lạ không.
+        errorLogObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.newErrorLogEntryNotification,
+            object: item,
+            queue: .main
+        ) { _ in
+            guard let log = item.errorLog(), let last = log.events.last else { return }
+            Logger.shared.log("[ErrorLog] URI=\(last.uri ?? "?") status=\(last.errorStatusCode) domain=\(last.errorDomain) comment=\(last.errorComment ?? "?")")
+        }
+
+        // Dump state mỗi 2s trong 12s đầu — không cần KVO trên mỗi property riêng.
+        let startedAt = Date()
+        diagTimer?.invalidate()
+        diagTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self, weak item] timer in
+            guard let item = item else { timer.invalidate(); return }
+            let elapsed = Date().timeIntervalSince(startedAt)
+            if elapsed > 12 { timer.invalidate(); self?.diagTimer = nil; return }
+            let size = item.presentationSize
+            let dur = CMTimeGetSeconds(item.duration)
+            let loaded = item.loadedTimeRanges.first.map { CMTimeRangeGetEnd($0.timeRangeValue) }
+            let loadedSec = loaded.map { CMTimeGetSeconds($0) } ?? 0
+            Logger.shared.log("[Diag \(Int(elapsed))s] size=\(Int(size.width))x\(Int(size.height)) duration=\(dur.isFinite ? String(format: "%.1f", dur) : "n/a") buffered=\(String(format: "%.1f", loadedSec))s bufferEmpty=\(item.isPlaybackBufferEmpty) likelyKeepUp=\(item.isPlaybackLikelyToKeepUp)")
         }
 
         let player = AVPlayer(playerItem: item)
@@ -282,10 +333,13 @@ class PlayerController: UIViewController {
 
     @objc private func retry() {
         // Gỡ player cũ + observer
+        diagTimer?.invalidate(); diagTimer = nil
         statusObservation?.invalidate()
         statusObservation = nil
         if let o = errorObserver { NotificationCenter.default.removeObserver(o); errorObserver = nil }
         if let o = stallObserver { NotificationCenter.default.removeObserver(o); stallObserver = nil }
+        if let o = accessLogObserver { NotificationCenter.default.removeObserver(o); accessLogObserver = nil }
+        if let o = errorLogObserver { NotificationCenter.default.removeObserver(o); errorLogObserver = nil }
         for child in children {
             child.willMove(toParent: nil)
             child.view.removeFromSuperview()
