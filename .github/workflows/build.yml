@@ -38,6 +38,7 @@ jobs:
           
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: AVS_iOS_App-IPA
           path: AVS_iOS_App.ipa
