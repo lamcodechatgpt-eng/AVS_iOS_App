@@ -33,26 +33,49 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             // Script để hook XHR/Fetch, bắt link m3u8 khi player tải ẩn qua API và in ra DOM để checkDOM thấy được
             let jsHook = """
             (function() {
-                var open = XMLHttpRequest.prototype.open;
-                XMLHttpRequest.prototype.open = function(method, url) {
-                    if (url && typeof url === 'string' && url.indexOf('.m3u8') !== -1) {
+                var injectM3u8 = function(url) {
+                    if (url && typeof url === 'string' && url.indexOf('.m3u8') !== -1 && document.body) {
                         var div = document.createElement('div');
                         div.innerText = 'file: "' + url + '"';
+                        div.style.display = 'none';
                         document.body.appendChild(div);
                     }
+                };
+
+                var open = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    injectM3u8(url);
                     return open.apply(this, arguments);
                 };
+                
                 var originalFetch = window.fetch;
                 window.fetch = function() {
                     var url = arguments[0];
                     if (typeof url === 'object' && url.url) { url = url.url; }
-                    if (url && typeof url === 'string' && url.indexOf('.m3u8') !== -1) {
-                        var div = document.createElement('div');
-                        div.innerText = 'file: "' + url + '"';
-                        document.body.appendChild(div);
-                    }
+                    injectM3u8(url);
                     return originalFetch.apply(this, arguments);
                 };
+
+                // Bắt link m3u8 gán trực tiếp vào thẻ video trên iOS
+                var observer = new MutationObserver(function(mutations) {
+                    mutations.forEach(function(mutation) {
+                        var target = mutation.target;
+                        if (target.tagName === 'VIDEO' || target.tagName === 'SOURCE') {
+                            injectM3u8(target.src || target.getAttribute('src'));
+                        }
+                        if (mutation.addedNodes) {
+                            mutation.addedNodes.forEach(function(n) {
+                                if (n.tagName === 'VIDEO' || n.tagName === 'SOURCE') {
+                                    injectM3u8(n.src || n.getAttribute('src'));
+                                }
+                            });
+                        }
+                    });
+                });
+                
+                document.addEventListener("DOMContentLoaded", function() {
+                    observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+                });
             })();
             """
             let script = WKUserScript(source: jsHook, injectionTime: .atDocumentStart, forMainFrameOnly: false)
@@ -114,35 +137,45 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             if loadId != self.currentLoadId { return }
             
-            webView.evaluateJavaScript("document.documentElement.outerHTML") { [weak self] result, _ in
-                let html = (result as? String) ?? ""
+            let jsCheck = """
+            (function() {
+                if (\(waitForIframe ? "true" : "false")) {
+                    return document.documentElement.outerHTML.indexOf('.m3u8') !== -1;
+                }
+                var html = document.documentElement.outerHTML;
+                var path = window.location.pathname;
+                
+                var isWatchPage = path.indexOf('xem-phim.html') !== -1 || path.indexOf('-tap-') !== -1 || path.indexOf('/tap-') !== -1 || html.indexOf('PLAYER_DATA') !== -1;
+                
+                if (isWatchPage) {
+                    var hasWatchEps = document.querySelectorAll('.list-episode a, .episode-link, .halim-list-eps a').length > 0;
+                    return hasWatchEps || html.indexOf('.m3u8') !== -1;
+                }
+                
+                var hasTPost = document.querySelectorAll('.TPost, .mli-eps, article').length > 0;
+                var isHome = (path === '/' || path === '' || html.indexOf('TPostMv') !== -1 || html.indexOf('MovieList') !== -1) && hasTPost;
+                
+                var isInfo = html.indexOf('MovieInfo') !== -1 || html.indexOf('MvTbCn') !== -1;
+                
+                return isHome || isInfo || html.indexOf('.m3u8') !== -1;
+            })();
+            """
+            
+            webView.evaluateJavaScript(jsCheck) { [weak self] result, _ in
+                let isReady = (result as? Bool) ?? false
                 guard let self = self else { return }
                 
-                webView.evaluateJavaScript("document.querySelectorAll('.list-episode a, .episode-link, .halim-list-eps a').length") { result2, _ in
-                    let episodeLinksCount = (result2 as? Int) ?? 0
-                    
-                    var isReady = false
-                    if waitForIframe {
-                        // Nếu là iframe, bắt buộc phải chờ xuất hiện file .m3u8
-                        isReady = html.contains(".m3u8")
-                    } else {
-                        // Chờ tới khi trang chủ load xong AJAX (hiện TPostMv) hoặc trang chi tiết load tập phim (tap-) hoặc iframe load xong (.m3u8)
-                        let isHome = html.contains("TPostMv") || html.contains("MovieList")
-                        let isInfo = html.contains("MovieInfo") || html.contains("MvTbCn")
-                        let isWatch = html.contains("PLAYER_DATA") && (episodeLinksCount > 0 || html.components(separatedBy: "tap-").count > 5)
-                        
-                        isReady = isHome || isInfo || isWatch || html.contains(".m3u8")
-                    }
-                    
-                    if isReady {
+                if isReady {
+                    webView.evaluateJavaScript("document.documentElement.outerHTML") { htmlResult, _ in
+                        let html = (htmlResult as? String) ?? ""
                         let queue = self.completionQueue
                         self.completionQueue.removeAll()
                         for completion in queue {
                             completion(html)
                         }
-                    } else {
-                        self.checkDOM(webView: webView, loadId: loadId, retries: retries - 1, waitForIframe: waitForIframe)
                     }
+                } else {
+                    self.checkDOM(webView: webView, loadId: loadId, retries: retries - 1, waitForIframe: waitForIframe)
                 }
             }
         }
@@ -204,9 +237,15 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                        let titleRange = Range(match.range(at: 2), in: html) {
                         
                         let link = String(html[linkRange])
-                        let title = String(html[titleRange]).replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression, range: nil)
+                        let title = String(html[titleRange]).replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression, range: nil).trimmingCharacters(in: .whitespacesAndNewlines)
                         
-                        episodes.append(Episode(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                        let lowerTitle = title.lowercased()
+                        let lowerLink = link.lowercased()
+                        if lowerTitle.contains("đăng nhập") || lowerTitle.contains("login") || lowerLink.contains("login") || lowerTitle.contains("đăng ký") {
+                            continue
+                        }
+                        
+                        episodes.append(Episode(title: title,
                                                 link: link.hasPrefix("http") ? link : NetworkManager.shared.resolvedDomain + link,
                                                 episodeId: nil))
                     }

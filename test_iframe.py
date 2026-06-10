@@ -1,33 +1,15 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import time
-
-options = Options()
-options.add_argument('--disable-gpu')
-
-print("Starting Chrome...")
-driver = webdriver.Chrome(options=options)
-
+import urllib.request
 try:
-    print("Navigating to iframe...")
-    # Iframe from previous selenium script
-    driver.get("https://stream.googleapiscdn.com/player/3f81e251fc47d91b697d84397fb326a0a330432f8cc1596e1bea08906bd2db91?nextName=10&nextUrl=...")
-    
-    # Wait for the player to initialize
-    time.sleep(10)
-    
-    html = driver.page_source
-    if ".m3u8" in html:
-        print("YES! m3u8 is in the HTML!")
-    else:
-        print("NO! m3u8 is NOT in the HTML!")
-        print("Let's check Network requests for m3u8 via JS...")
-        logs = driver.execute_script("return window.performance.getEntriesByType('resource').map(e => e.name);")
-        for log in logs:
-            if ".m3u8" in log:
-                print(f"Found m3u8 in network logs: {log}")
-finally:
-    driver.quit()
+    url = 'https://stream.googleapiscdn.com/player/534c032f0ace0f1807ae5e01dc0acad8213315ac3ee1c1309a5723997e4aa0e5?isFinal=1'
+    req = urllib.request.Request(url)
+    req.add_header('User-Agent', 'Mozilla/5.0')
+    req.add_header('Referer', 'https://animevietsub.by/')
+    resp = urllib.request.urlopen(req)
+    html = resp.read().decode('utf-8')
+    import re
+    m3u8 = re.findall(r'https?://.*?\.m3u8.*', html)
+    print("Found m3u8:", len(m3u8))
+    if m3u8:
+        print(m3u8[0][:200])
+except Exception as e:
+    print("Error:", e)
