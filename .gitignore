@@ -1,0 +1,40 @@
+# Build artifacts
+*.zip
+Build_Output*/
+build/
+DerivedData/
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# Python debug scripts / scrapers (chỉ chạy local, không cần đẩy lên repo iOS app)
+selenium_test*.py
+test_api*.py
+test_iframe*.py
+test_pixeldrain*.py
+test_uguu.py
+test_github*.py
+test_scraper.py
+test_search*.py
+test_domain.py
+test_js.py
+delete_artifacts*.py
+trigger_build.py
+fetch_final_link.py
+
+# HTML / JS dumps phục vụ debug
+iframe_dump.html
+test_iframe*.html
+watch_page.html
+home.html
+home-v1.js
+
+# Swift snippet debug
+test_regex.swift
+
+# OS
+.DS_Store
+Thumbs.db
