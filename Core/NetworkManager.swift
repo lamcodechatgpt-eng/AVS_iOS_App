@@ -58,46 +58,120 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             // Script để hook XHR/Fetch, bắt link m3u8 khi player tải ẩn qua API và in ra DOM để checkDOM thấy được
             let jsHook = """
             (function() {
-                var injectM3u8 = function(url) {
-                    if (url && typeof url === 'string' && url.indexOf('.m3u8') !== -1 && document.body) {
-                        var div = document.createElement('div');
-                        div.innerText = 'file: "' + url + '"';
-                        div.style.display = 'none';
-                        document.body.appendChild(div);
+                // Regex dùng chung cho cả URL lẫn body text
+                var M3U8_RE = /https?:\\/\\/[^\\s"'<>\\\\]+?\\.m3u8[^\\s"'<>\\\\]*/gi;
+                var IFRAME_HOSTS_RE = /https?:\\/\\/[^\\s"'<>\\\\]*?(googleapiscdn|streamlare|hydrax|fembed|streamtape|filemoon)[^\\s"'<>\\\\]+/gi;
+
+                var injectInBody = function(text) {
+                    if (!document.body) return;
+                    var div = document.createElement('div');
+                    div.innerText = text;
+                    div.style.display = 'none';
+                    document.body.appendChild(div);
+                };
+
+                var injectM3u8Marker = function(url) {
+                    if (!url || typeof url !== 'string') return;
+                    var clean = url.replace(/\\\\\\//g, '/');
+                    if (clean.indexOf('.m3u8') === -1) return;
+                    injectInBody('file: "' + clean + '"');
+                    try {
+                        if (window.top && window.top !== window) {
+                            window.top.postMessage({ avsM3u8: clean }, '*');
+                        }
+                    } catch (e) {}
+                };
+
+                var injectIframeMarker = function(url) {
+                    if (!url || typeof url !== 'string') return;
+                    var clean = url.replace(/\\\\\\//g, '/');
+                    injectInBody('iframe: "' + clean + '"');
+                    try {
+                        if (window.top && window.top !== window) {
+                            window.top.postMessage({ avsIframe: clean }, '*');
+                        }
+                    } catch (e) {}
+                };
+
+                // Quét response body: m3u8 trực tiếp HOẶC link iframe player (host quen).
+                // AVS ajax/player trả về {link: "https://stream.googleapiscdn.com/player/HASH",
+                // playTech: "iframe"} — request URL không có gì đặc biệt, chỉ response mới có.
+                var scanText = function(text) {
+                    if (typeof text !== 'string' || text.length === 0) return;
+                    var m, count;
+                    count = 0;
+                    M3U8_RE.lastIndex = 0;
+                    while ((m = M3U8_RE.exec(text)) !== null && count++ < 8) {
+                        injectM3u8Marker(m[0]);
+                    }
+                    count = 0;
+                    IFRAME_HOSTS_RE.lastIndex = 0;
+                    while ((m = IFRAME_HOSTS_RE.exec(text)) !== null && count++ < 8) {
+                        injectIframeMarker(m[0]);
                     }
                 };
 
+                // Tương thích ngược với phần code cũ gọi injectMarker(url) cho m3u8
+                var injectMarker = injectM3u8Marker;
+
+                // Hook XHR: cả request URL lẫn response text khi xong
                 var open = XMLHttpRequest.prototype.open;
                 XMLHttpRequest.prototype.open = function(method, url) {
-                    injectM3u8(url);
+                    injectMarker(url);
+                    try {
+                        this.addEventListener('load', function() {
+                            try { scanText(this.responseText || ''); } catch (e) {}
+                        });
+                    } catch (e) {}
                     return open.apply(this, arguments);
                 };
-                
+
+                // Hook fetch: URL + clone response để đọc text mà không ảnh hưởng caller
                 var originalFetch = window.fetch;
                 window.fetch = function() {
                     var url = arguments[0];
-                    if (typeof url === 'object' && url.url) { url = url.url; }
-                    injectM3u8(url);
-                    return originalFetch.apply(this, arguments);
+                    if (typeof url === 'object' && url && url.url) { url = url.url; }
+                    injectMarker(url);
+                    var p = originalFetch.apply(this, arguments);
+                    try {
+                        return p.then(function(resp) {
+                            try {
+                                resp.clone().text().then(function(t) { scanText(t); }).catch(function(){});
+                            } catch (e) {}
+                            return resp;
+                        });
+                    } catch (e) {
+                        return p;
+                    }
                 };
 
-                // Bắt link m3u8 gán trực tiếp vào thẻ video trên iOS
+                // Lắng nghe message từ iframe con (cross-origin) gửi lên: m3u8 hoặc iframe URL
+                if (!window.__avsTopHooked && window.top === window) {
+                    window.__avsTopHooked = true;
+                    window.addEventListener('message', function(e) {
+                        if (!e || !e.data || typeof e.data !== 'object') return;
+                        if (e.data.avsM3u8) injectM3u8Marker(e.data.avsM3u8);
+                        if (e.data.avsIframe) injectIframeMarker(e.data.avsIframe);
+                    });
+                }
+
+                // Bắt link m3u8 gán trực tiếp vào thẻ video / source trên iOS
                 var observer = new MutationObserver(function(mutations) {
                     mutations.forEach(function(mutation) {
                         var target = mutation.target;
                         if (target.tagName === 'VIDEO' || target.tagName === 'SOURCE') {
-                            injectM3u8(target.src || target.getAttribute('src'));
+                            injectMarker(target.src || target.getAttribute('src'));
                         }
                         if (mutation.addedNodes) {
                             mutation.addedNodes.forEach(function(n) {
                                 if (n.tagName === 'VIDEO' || n.tagName === 'SOURCE') {
-                                    injectM3u8(n.src || n.getAttribute('src'));
+                                    injectMarker(n.src || n.getAttribute('src'));
                                 }
                             });
                         }
                     });
                 });
-                
+
                 document.addEventListener("DOMContentLoaded", function() {
                     observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
                 });
@@ -108,7 +182,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 var autoPlayTries = 0;
                 var autoPlay = function() {
                     autoPlayTries++;
-                    if (autoPlayTries > 30) return; // ~15s
+                    if (autoPlayTries > 60) return; // ~30s
                     var path = window.location.pathname || '';
                     var looksLikeWatch = path.indexOf('xem-phim') !== -1
                         || path.indexOf('-tap-') !== -1
@@ -116,20 +190,26 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                         || (document.documentElement.outerHTML || '').indexOf('PLAYER_DATA') !== -1;
                     if (!looksLikeWatch) { setTimeout(autoPlay, 500); return; }
 
-                    // Ưu tiên tập đang xem (halim-watching), kế đến mọi nút play/episode
+                    // Đã thấy luồng — không cần click tiếp.
+                    var topHTML = document.documentElement.outerHTML || '';
+                    if (topHTML.indexOf('.m3u8') !== -1) return;
+
+                    // Bấm thử mọi candidate (nút Xem phim / play / tập đang xem).
+                    // KHÔNG dừng sau click đầu vì click có thể không trigger AJAX —
+                    // tiếp tục poll cho tới khi thấy m3u8 hoặc hết lượt.
                     var candidates = document.querySelectorAll(
-                        '.halim-watching, a.halim-watching, .episode-active, .play-button, '
-                        + '.video-play-button, .btn-play, #btn-watch, .watch-button, '
+                        '#btn-film-watch, .btn-film-watch, .play-button, .video-play-button, '
+                        + '.btn-play, #btn-watch, .watch-button, .jw-icon-display, '
+                        + '.halim-watching, a.halim-watching, .episode-active, '
                         + '.halim-btn.halim-btn-2, .episode-link, .list-episode a, '
                         + '.halim-list-eps a'
                     );
-                    var clicked = false;
-                    for (var i = 0; i < candidates.length && !clicked; i++) {
-                        try { candidates[i].click(); clicked = true; } catch (e) {}
+                    for (var i = 0; i < candidates.length && i < 6; i++) {
+                        try { candidates[i].click(); } catch (e) {}
                     }
                     var video = document.querySelector('video');
                     if (video) { try { video.play(); } catch (e) {} }
-                    if (!clicked) setTimeout(autoPlay, 500);
+                    setTimeout(autoPlay, 500);
                 };
                 // Chỉ khởi động auto-click khi đường dẫn rõ ràng là trang xem phim.
                 // Không polling trên trang chủ / trang tìm kiếm / trang thông tin để
