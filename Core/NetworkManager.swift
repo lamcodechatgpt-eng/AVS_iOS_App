@@ -69,7 +69,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
     
     // Tải HTML thông qua WKWebView để tự động bypass Cloudflare/Bot-check
-    func fetchHTML(url: String, completion: @escaping (String) -> Void) {
+    func fetchHTML(url: String, waitForIframe: Bool = false, completion: @escaping (String) -> Void) {
         DispatchQueue.main.async {
             // Phải add vào view hierarchy thì WKWebView mới chạy thực tế trên iOS
             if self.webView.superview == nil, let window = UIApplication.shared.windows.first {
@@ -83,10 +83,11 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             self.completionQueue.append(completion)
             
             if let targetUrl = URL(string: url) {
-                let req = URLRequest(url: targetUrl)
+                var req = URLRequest(url: targetUrl)
+                req.setValue(self.resolvedDomain + "/", forHTTPHeaderField: "Referer")
                 self.webView.load(req)
                 // Khởi động vòng lặp kiểm tra DOM ngay lập tức
-                self.checkDOM(webView: self.webView, loadId: loadId, retries: 25) // Tăng thời gian chờ lên 25s cho mạng chậm
+                self.checkDOM(webView: self.webView, loadId: loadId, retries: 25, waitForIframe: waitForIframe) // Tăng thời gian chờ lên 25s cho mạng chậm
             }
         }
     }
@@ -97,7 +98,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
     
-    private func checkDOM(webView: WKWebView, loadId: Int, retries: Int) {
+    private func checkDOM(webView: WKWebView, loadId: Int, retries: Int, waitForIframe: Bool) {
         // Nếu đã có request mới đè lên, hủy vòng lặp này
         if loadId != self.currentLoadId { return }
         
@@ -117,15 +118,23 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 let html = (result as? String) ?? ""
                 guard let self = self else { return }
                 
-                // Chờ tới khi trang chủ load xong AJAX (hiện TPostMv) hoặc trang chi tiết load tập phim (tap-) hoặc iframe load xong (.m3u8)
-                if html.contains("TPostMv") || html.contains("mli-eps") || html.contains("tap-") || html.contains("PLAYER_DATA") || html.contains(".m3u8") {
+                var isReady = false
+                if waitForIframe {
+                    // Nếu là iframe, bắt buộc phải chờ xuất hiện file .m3u8
+                    isReady = html.contains(".m3u8")
+                } else {
+                    // Chờ tới khi trang chủ load xong AJAX (hiện TPostMv) hoặc trang chi tiết load tập phim (tap-) hoặc iframe load xong (.m3u8)
+                    isReady = html.contains("TPostMv") || html.contains("mli-eps") || html.contains("tap-") || html.contains("PLAYER_DATA") || html.contains(".m3u8")
+                }
+                
+                if isReady {
                     let queue = self.completionQueue
                     self.completionQueue.removeAll()
                     for completion in queue {
                         completion(html)
                     }
                 } else {
-                    self.checkDOM(webView: webView, loadId: loadId, retries: retries - 1)
+                    self.checkDOM(webView: webView, loadId: loadId, retries: retries - 1, waitForIframe: waitForIframe)
                 }
             }
         }
@@ -174,10 +183,11 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         completion(movies)
     }
     
-    func fetchEpisodes(movieUrl: String, completion: @escaping ([Episode]) -> Void) {
+    func fetchEpisodes(movieUrl: String, isRecursive: Bool = false, completion: @escaping ([Episode]) -> Void) {
         fetchHTML(url: movieUrl) { html in
             var episodes: [Episode] = []
-            let pattern = "<a[^>]+href=\"([^\"]+tap-[^\"]+\\.html)\"[^>]*>(.*?)</a>"
+            // Regex bắt tất cả các link chứa "tap-" hoặc có chữ "Tập" bên trong
+            let pattern = "(?i)<a[^>]*?href=[\"']([^\"']*?tap-[^\"']*?\\.html)[\"'][^>]*>(.*?)</a>"
             
             if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
                 let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
@@ -197,13 +207,21 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             
             var uniqueEps: [Episode] = []
             var seen = Set<String>()
-            for ep in episodes {
+            // Đảo ngược danh sách vì tập 1 thường nằm cuối trong HTML (để hiển thị theo thứ tự cũ -> mới)
+            for ep in episodes.reversed() {
                 if !seen.contains(ep.link) {
                     seen.insert(ep.link)
-                    uniqueEps.append(ep)
+                    uniqueEps.insert(ep, at: 0) // Giữ thứ tự đúng
                 }
             }
-            completion(uniqueEps)
+            
+            // Nếu tìm thấy <= 4 tập và chưa đệ quy, có thể ta đang ở trang thông tin (chỉ hiện tập mới cập nhật).
+            // Ta sẽ vào thẳng link tập đầu tiên tìm được để quét toàn bộ danh sách tập.
+            if uniqueEps.count <= 4 && !isRecursive && !uniqueEps.isEmpty {
+                self.fetchEpisodes(movieUrl: uniqueEps[0].link, isRecursive: true, completion: completion)
+            } else {
+                completion(uniqueEps)
+            }
         }
     }
 }
