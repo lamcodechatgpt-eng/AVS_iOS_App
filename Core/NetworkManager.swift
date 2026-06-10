@@ -118,23 +118,31 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 let html = (result as? String) ?? ""
                 guard let self = self else { return }
                 
-                var isReady = false
-                if waitForIframe {
-                    // Nếu là iframe, bắt buộc phải chờ xuất hiện file .m3u8
-                    isReady = html.contains(".m3u8")
-                } else {
-                    // Chờ tới khi trang chủ load xong AJAX (hiện TPostMv) hoặc trang chi tiết load tập phim (tap-) hoặc iframe load xong (.m3u8)
-                    isReady = html.contains("TPostMv") || html.contains("mli-eps") || html.contains("tap-") || html.contains("PLAYER_DATA") || html.contains(".m3u8")
-                }
-                
-                if isReady {
-                    let queue = self.completionQueue
-                    self.completionQueue.removeAll()
-                    for completion in queue {
-                        completion(html)
+                webView.evaluateJavaScript("document.querySelectorAll('.list-episode a, .episode-link, .halim-list-eps a').length") { result2, _ in
+                    let episodeLinksCount = (result2 as? Int) ?? 0
+                    
+                    var isReady = false
+                    if waitForIframe {
+                        // Nếu là iframe, bắt buộc phải chờ xuất hiện file .m3u8
+                        isReady = html.contains(".m3u8")
+                    } else {
+                        // Chờ tới khi trang chủ load xong AJAX (hiện TPostMv) hoặc trang chi tiết load tập phim (tap-) hoặc iframe load xong (.m3u8)
+                        let isHome = html.contains("TPostMv") || html.contains("MovieList")
+                        let isInfo = html.contains("MovieInfo") || html.contains("MvTbCn")
+                        let isWatch = html.contains("PLAYER_DATA") && (episodeLinksCount > 0 || html.components(separatedBy: "tap-").count > 5)
+                        
+                        isReady = isHome || isInfo || isWatch || html.contains(".m3u8")
                     }
-                } else {
-                    self.checkDOM(webView: webView, loadId: loadId, retries: retries - 1, waitForIframe: waitForIframe)
+                    
+                    if isReady {
+                        let queue = self.completionQueue
+                        self.completionQueue.removeAll()
+                        for completion in queue {
+                            completion(html)
+                        }
+                    } else {
+                        self.checkDOM(webView: webView, loadId: loadId, retries: retries - 1, waitForIframe: waitForIframe)
+                    }
                 }
             }
         }

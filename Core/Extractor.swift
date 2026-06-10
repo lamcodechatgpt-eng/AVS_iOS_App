@@ -42,7 +42,8 @@ class Extractor {
             if let regex = try? NSRegularExpression(pattern: pattern),
                let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {
-                completion(URL(string: String(html[range])))
+                let rawUrl = String(html[range]).replacingOccurrences(of: "\\/", with: "/")
+                completion(URL(string: rawUrl))
             } else {
                 print("Không tìm thấy m3u8 trong iframe: \\(iframeUrl)")
                 completion(nil)
