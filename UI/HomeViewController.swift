@@ -66,10 +66,19 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
         }
     }
     
+    private func fixKeyword(_ str: String) -> String {
+        var newStr = str.lowercased()
+        let charsToRemove = "<>`~!@#$%^&*()_|=?;:'\",.{}[]\\/"
+        newStr.removeAll { charsToRemove.contains($0) }
+        return newStr.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: "+")
+    }
+    
     // MARK: - Search
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        guard let text = searchBar.text, !text.isEmpty else { return }
-        let keyword = text.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? text
+        guard let text = searchBar.text, !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        let keyword = fixKeyword(text)
         let searchUrl = "\(NetworkManager.shared.resolvedDomain)/tim-kiem/\(keyword)/"
         
         activityIndicator.startAnimating()
