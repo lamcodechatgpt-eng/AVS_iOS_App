@@ -111,32 +111,90 @@ class Extractor {
                 Logger.shared.log("[Extractor] Iframe \(iframeUrl) trả về rỗng (CF challenge chưa giải xong?).")
                 return completion(nil)
             }
-            // Hết retry nhưng HTML có nội dung — fall through để regex tìm m3u8.
-            // Nếu vẫn không match, branch fail sẽ dump diagnostic.
-            // Tìm file m3u8 trong source của iframe (dùng regex lỏng lẻo hơn để bắt cả file: "...", src="...", source: '...')
-            let pattern = "(?i)[\"'](https?://[^\"\'\\s]+?\\.m3u8[^\"\'\\s]*)[\"']"
-            if let regex = try? NSRegularExpression(pattern: pattern),
-               let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
-               let range = Range(match.range(at: 1), in: html) {
-                let rawUrl = htmlDecode(String(html[range]).replacingOccurrences(of: "\\/", with: "/"))
-                Logger.shared.log("[Extractor] Bóc được m3u8 từ iframe: \(rawUrl)")
-                Logger.shared.log("[Extractor] Referer cho stream: \(referer)")
-                guard let url = URL(string: rawUrl) else { return completion(nil) }
-                completion(Stream(url: url, referer: referer))
-            } else {
-                Logger.shared.log("[Extractor] Không tìm thấy m3u8 trong iframe: \(iframeUrl)")
-                Logger.shared.log("[Extractor] iframe HTML dài \(html.count) ký tự. Quanh các từ khoá:")
-                for keyword in [".m3u8", "file:", "source:", "sources", "jwplayer", "setup(", "<video", "src=\"http"] {
-                    if let range = html.range(of: keyword) {
-                        let start = html.index(range.lowerBound, offsetBy: -60, limitedBy: html.startIndex) ?? html.startIndex
-                        let end = html.index(range.upperBound, offsetBy: 200, limitedBy: html.endIndex) ?? html.endIndex
-                        var snippet = String(html[start..<end])
-                        snippet = snippet.replacingOccurrences(of: "\n", with: " ")
-                        Logger.shared.log("[Extractor]   '\(keyword)': ...\(snippet)...")
+
+            // (i) ƯU TIÊN: lấy m3u8 từ data URL trên <video src="data:application/...mpegurl;base64,...">.
+            // AVS dùng anti-bot avs-shield + avs-fingerprint, sau khi pass, JWPlayer chèn
+            // m3u8 đã giải mã DIRECTLY vào video element. URL playlist.m3u8?token=JWT đối
+            // với client không qua anti-bot luôn trả 403/429 — cờ này mới là luồng thật.
+            if html.contains("videoData: present") || html.range(of: "data:application/vnd.apple.mpegurl", options: .caseInsensitive) != nil {
+                NetworkManager.shared.fetchVideoSrc { videoSrc in
+                    if let url = handleVideoSrc(videoSrc) {
+                        Logger.shared.log("[Extractor] Bóc m3u8 từ <video> data URL → \(url.path) (\(url.absoluteString.count) ký tự)")
+                        // File:// URL → AVPlayer không cần Referer; segment Google Photos
+                        // public không check Referer.
+                        completion(Stream(url: url, referer: referer))
+                    } else {
+                        Logger.shared.log("[Extractor] Có dấu hiệu video data URL nhưng không lấy được src — fall back regex.")
+                        regexExtractM3U8(html: html, iframeUrl: iframeUrl, referer: referer, completion: completion)
                     }
                 }
-                completion(nil)
+                return
             }
+            // Hết retry nhưng HTML có nội dung — fall through để regex tìm m3u8.
+            // Nếu vẫn không match, branch fail sẽ dump diagnostic.
+            regexExtractM3U8(html: html, iframeUrl: iframeUrl, referer: referer, completion: completion)
+        }
+    }
+
+    /// Decode data URL m3u8 (base64) → ghi ra file tạm → trả về file:// URL.
+    /// Trả nil nếu src không phải data URL HLS hoặc decode thất bại.
+    private static func handleVideoSrc(_ src: String) -> URL? {
+        guard src.lowercased().hasPrefix("data:") else { return nil }
+        let lc = src.lowercased()
+        let isHLS = lc.contains("application/vnd.apple.mpegurl")
+            || lc.contains("application/x-mpegurl")
+            || lc.contains("audio/mpegurl")
+        guard isHLS else { return nil }
+        // data:application/vnd.apple.mpegurl;base64,XXXXX
+        guard let commaIdx = src.firstIndex(of: ","), let semiIdx = src.firstIndex(of: ";") else { return nil }
+        let metaRange = src.index(after: semiIdx)..<commaIdx
+        let isBase64 = src[metaRange].lowercased().contains("base64")
+        let payload = String(src[src.index(after: commaIdx)...])
+        let m3u8Data: Data?
+        if isBase64 {
+            m3u8Data = Data(base64Encoded: payload)
+        } else {
+            m3u8Data = payload.removingPercentEncoding?.data(using: .utf8)
+        }
+        guard let data = m3u8Data, !data.isEmpty else {
+            Logger.shared.log("[Extractor] Decode data URL thất bại (\(payload.prefix(40))...)")
+            return nil
+        }
+        let tmpDir = FileManager.default.temporaryDirectory
+        let fileURL = tmpDir.appendingPathComponent("avs-\(Int(Date().timeIntervalSince1970)).m3u8")
+        do {
+            try data.write(to: fileURL, options: .atomic)
+            return fileURL
+        } catch {
+            Logger.shared.log("[Extractor] Ghi tmp m3u8 thất bại: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func regexExtractM3U8(html: String, iframeUrl: String, referer: String, completion: @escaping (Stream?) -> Void) {
+        // Tìm file m3u8 trong source của iframe (dùng regex lỏng lẻo hơn để bắt cả file: "...", src="...", source: '...')
+        let pattern = "(?i)[\"'](https?://[^\"\'\\s]+?\\.m3u8[^\"\'\\s]*)[\"']"
+        if let regex = try? NSRegularExpression(pattern: pattern),
+           let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+           let range = Range(match.range(at: 1), in: html) {
+            let rawUrl = htmlDecode(String(html[range]).replacingOccurrences(of: "\\/", with: "/"))
+            Logger.shared.log("[Extractor] Bóc được m3u8 từ iframe: \(rawUrl)")
+            Logger.shared.log("[Extractor] Referer cho stream: \(referer)")
+            guard let url = URL(string: rawUrl) else { return completion(nil) }
+            completion(Stream(url: url, referer: referer))
+        } else {
+            Logger.shared.log("[Extractor] Không tìm thấy m3u8 trong iframe: \(iframeUrl)")
+            Logger.shared.log("[Extractor] iframe HTML dài \(html.count) ký tự. Quanh các từ khoá:")
+            for keyword in [".m3u8", "file:", "source:", "sources", "jwplayer", "setup(", "<video", "src=\"http"] {
+                if let range = html.range(of: keyword) {
+                    let start = html.index(range.lowerBound, offsetBy: -60, limitedBy: html.startIndex) ?? html.startIndex
+                    let end = html.index(range.upperBound, offsetBy: 200, limitedBy: html.endIndex) ?? html.endIndex
+                    var snippet = String(html[start..<end])
+                    snippet = snippet.replacingOccurrences(of: "\n", with: " ")
+                    Logger.shared.log("[Extractor]   '\(keyword)': ...\(snippet)...")
+                }
+            }
+            completion(nil)
         }
     }
 }

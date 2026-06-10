@@ -155,17 +155,39 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     });
                 }
 
-                // Bắt link m3u8 gán trực tiếp vào thẻ video / source trên iOS
+                // Bắt link m3u8 gán trực tiếp vào thẻ video / source trên iOS,
+                // BAO GỒM cả data URL chứa m3u8 đã giải mã sẵn (JWPlayer của AVS
+                // gắn vào src dạng "data:application/vnd.apple.mpegurl;base64,...").
+                var injectVideoDataMarker = function(src) {
+                    if (!src || typeof src !== 'string') return;
+                    var lc = src.toLowerCase();
+                    if (lc.indexOf('data:application/vnd.apple.mpegurl') === 0
+                        || lc.indexOf('data:application/x-mpegurl') === 0
+                        || lc.indexOf('data:audio/mpegurl') === 0) {
+                        // KHÔNG inject toàn bộ data URL (có thể vài MB) vào innerText —
+                        // chỉ đánh dấu sự tồn tại + post message để top frame biết và
+                        // Extractor có thể querySelector('video').src lấy giá trị thật.
+                        injectInBody('videoData: present');
+                        try {
+                            if (window.top && window.top !== window) {
+                                window.top.postMessage({ avsVideoData: true }, '*');
+                            }
+                        } catch (e) {}
+                    } else {
+                        injectM3u8Marker(src);
+                    }
+                };
+
                 var observer = new MutationObserver(function(mutations) {
                     mutations.forEach(function(mutation) {
                         var target = mutation.target;
                         if (target.tagName === 'VIDEO' || target.tagName === 'SOURCE') {
-                            injectMarker(target.src || target.getAttribute('src'));
+                            injectVideoDataMarker(target.src || target.getAttribute('src'));
                         }
                         if (mutation.addedNodes) {
                             mutation.addedNodes.forEach(function(n) {
                                 if (n.tagName === 'VIDEO' || n.tagName === 'SOURCE') {
-                                    injectMarker(n.src || n.getAttribute('src'));
+                                    injectVideoDataMarker(n.src || n.getAttribute('src'));
                                 }
                             });
                         }
@@ -315,6 +337,18 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
     
+    /// Lấy giá trị src của <video> hiện tại trong WKWebView. Dùng khi iframe player
+    /// đã render và JWPlayer gắn data URL HLS lên <video> (không in ra outerHTML
+    /// theo cách regex thông thường bắt được). Trả về chuỗi rỗng nếu không có.
+    func fetchVideoSrc(completion: @escaping (String) -> Void) {
+        DispatchQueue.main.async {
+            let js = "(function(){var v=document.querySelector('video');return v?(v.src||v.getAttribute('src')||''):''})()"
+            self.webView.evaluateJavaScript(js) { result, _ in
+                completion((result as? String) ?? "")
+            }
+        }
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // Setter của resolvedDomain đã tự lọc theo isAVSHost, ở đây chỉ cần log để debug.
         if let url = webView.url {
@@ -381,8 +415,13 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     // nên indexOf trả về true ngay lập tức trước khi luồng thực sự được fetch).
                     if (/[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.m3u8/i.test(oh)) return true;
                     if (/file\\s*:\\s*[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.m3u8/i.test(oh)) return true;
-                    // <video src="..m3u8..."> trên iOS
+                    // <video src="..m3u8..."> hoặc data URL HLS đã inject vào video element
                     if (document.querySelector('video[src*=".m3u8"], source[src*=".m3u8"]')) return true;
+                    // Data URL HLS đã chèn vào video src (JWPlayer của AVS làm trò này sau khi
+                    // anti-bot avs-shield.min.js / avs-fingerprint.min.js verify xong).
+                    var v = document.querySelector('video');
+                    if (v && v.src && /^data:(application\\/vnd\\.apple\\.mpegurl|application\\/x-mpegurl|audio\\/mpegurl)/i.test(v.src)) return true;
+                    if (oh.indexOf('videoData: present') !== -1) return true;
                     return false;
                 }
                 var html = document.documentElement.outerHTML;
