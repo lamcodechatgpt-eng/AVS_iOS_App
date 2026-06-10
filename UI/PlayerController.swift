@@ -48,9 +48,37 @@ class PlayerController: UIViewController {
                 }
 
                 Logger.shared.log("[PlayerController] Tạo AVPlayer với m3u8=\(stream.url.absoluteString) referer=\(stream.referer)")
-                self.attachPlayer(for: stream)
+                self.preflightAndAttach(stream: stream)
             }
         }
+    }
+
+    /// Gửi HEAD request tới m3u8 trước khi giao cho AVPlayer để xác minh server thực sự
+    /// chấp nhận. Nếu trả 403/404 thì rõ ràng Referer/cookie/expiry là vấn đề; nếu 200
+    /// nhưng AVPlayer vẫn fail thì lỗi là codec / HLS variant / format.
+    private func preflightAndAttach(stream: Stream) {
+        var req = URLRequest(url: stream.url)
+        req.httpMethod = "HEAD"
+        req.timeoutInterval = 8
+        req.setValue(stream.referer, forHTTPHeaderField: "Referer")
+        req.setValue(String(stream.referer.dropLast()), forHTTPHeaderField: "Origin")
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
+        URLSession.shared.dataTask(with: req) { _, resp, err in
+            DispatchQueue.main.async {
+                if let err = err {
+                    Logger.shared.log("[Preflight] LỖI mạng: \(err.localizedDescription)")
+                } else if let http = resp as? HTTPURLResponse {
+                    Logger.shared.log("[Preflight] HTTP \(http.statusCode) cho \(stream.url.host ?? "?")")
+                    if http.statusCode == 403 || http.statusCode == 401 {
+                        Logger.shared.log("[Preflight] Server từ chối — Referer/cookie/expiry sai. Header gửi: Referer=\(stream.referer)")
+                    } else if http.statusCode == 404 {
+                        Logger.shared.log("[Preflight] 404 — link m3u8 đã hết hạn hoặc URL sai.")
+                    }
+                }
+                // Vẫn thử attach để có log AVPlayer cho dù preflight có lỗi.
+                self.attachPlayer(for: stream)
+            }
+        }.resume()
     }
 
     private func attachPlayer(for stream: Stream) {
@@ -123,12 +151,24 @@ class PlayerController: UIViewController {
     }
 
     private func showFailure() {
+        // Gỡ AVPlayerViewController nếu đang attach — nếu không, view nó sẽ che hết
+        // logs và user chỉ nhìn thấy logo gạch chéo.
+        for child in children {
+            child.willMove(toParent: nil)
+            child.view.removeFromSuperview()
+            child.removeFromParent()
+        }
+
         statusLabel.text = "Không phát được phim.\nLog gần nhất ở dưới — bấm Copy để gửi dev."
         statusLabel.isHidden = false
         logTextView.text = Logger.shared.snapshot()
         logTextView.isHidden = false
         copyButton.isHidden = false
         retryButton.isHidden = false
+        view.bringSubviewToFront(statusLabel)
+        view.bringSubviewToFront(logTextView)
+        view.bringSubviewToFront(copyButton)
+        view.bringSubviewToFront(retryButton)
         DispatchQueue.main.async {
             let bottom = NSRange(location: max(0, self.logTextView.text.utf16.count - 1), length: 1)
             self.logTextView.scrollRangeToVisible(bottom)
