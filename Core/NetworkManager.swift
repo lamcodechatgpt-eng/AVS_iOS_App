@@ -646,6 +646,82 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         return result
     }
     
+    // MARK: - Movie details (info page)
+
+    /// Fetch trang info phim → parse description, year, rating, banner, genres.
+    /// Cache 24h vì info ít đổi.
+    func fetchMovieDetails(movieUrl: String, completion: @escaping (MovieDetails?) -> Void) {
+        let key = "details." + (movieUrl.data(using: .utf8)?.base64EncodedString() ?? movieUrl)
+        if let cached: MovieDetails = DiskCache.shared.get(key, ttl: 86400, as: MovieDetails.self) {
+            completion(cached)
+            return
+        }
+        fetchHTML(url: movieUrl) { html in
+            let details = Self.parseDetails(from: html)
+            if !details.description.isEmpty || !details.genres.isEmpty {
+                DiskCache.shared.set(details, forKey: key)
+            }
+            completion(details)
+        }
+    }
+
+    private static func parseDetails(from html: String) -> MovieDetails {
+        func match(_ pattern: String, group: Int = 1) -> String {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else { return "" }
+            let r = NSRange(html.startIndex..., in: html)
+            guard let m = regex.firstMatch(in: html, range: r),
+                  let range = Range(m.range(at: group), in: html) else { return "" }
+            return String(html[range])
+                .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression, range: nil)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        var description = match("class=\"Description\">\\s*<p>(.+?)</p>")
+        if description.isEmpty {
+            description = match("<meta name=\"description\" content=\"([^\"]+)\"")
+        }
+        var year = match("class=\"Date\"[^>]*>([^<]+)")
+        if year.isEmpty {
+            year = match("\\b(19|20)\\d{2}\\b", group: 0)
+        }
+        var rating = match("class=\"post-ratings?\"[^>]*>([^<]+)")
+        if rating.isEmpty {
+            rating = match("\"ratingValue\"\\s*:\\s*\"?([0-9.]+)")
+        }
+        var banner = ""
+        if let r = try? NSRegularExpression(pattern: "class=\"TPostBg[\\s\\S]*?<img[^>]+src=\"([^\"]+)\"", options: .caseInsensitive) {
+            if let m = r.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+               let g = Range(m.range(at: 1), in: html) {
+                banner = String(html[g])
+            }
+        }
+        if banner.isEmpty {
+            if let r = try? NSRegularExpression(pattern: "<meta property=\"og:image\" content=\"([^\"]+)\"", options: .caseInsensitive) {
+                if let m = r.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+                   let g = Range(m.range(at: 1), in: html) {
+                    banner = String(html[g])
+                }
+            }
+        }
+
+        var genres: [String] = []
+        if let r = try? NSRegularExpression(pattern: "<a[^>]+href=\"[^\"]*?/the-loai/[^\"]+\"[^>]*>([^<]+)</a>", options: .caseInsensitive) {
+            let ms = r.matches(in: html, range: NSRange(html.startIndex..., in: html))
+            var seen = Set<String>()
+            for m in ms {
+                if let g = Range(m.range(at: 1), in: html) {
+                    let name = String(html[g]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !name.isEmpty && !seen.contains(name) && name.count < 30 {
+                        seen.insert(name)
+                        genres.append(name)
+                    }
+                }
+            }
+        }
+
+        return MovieDetails(description: description, year: year, rating: rating, bannerUrl: banner, genres: genres)
+    }
+
     func fetchEpisodes(movieUrl: String, isRecursive: Bool = false, completion: @escaping ([Episode]) -> Void) {
         // Cache 1 giờ theo URL phim.
         let cacheKey = "episodes." + (movieUrl.data(using: .utf8)?.base64EncodedString() ?? movieUrl)

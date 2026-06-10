@@ -35,9 +35,9 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
         guard !movies.isEmpty else { return }
         let pick = movies.randomElement()!
         Logger.shared.log("[Random] Mở phim ngẫu nhiên: \(pick.title)")
-        let episodeVC = EpisodeListViewController()
-        episodeVC.movie = pick
-        self.navigationController?.pushViewController(episodeVC, animated: true)
+        let infoVC = MovieInfoViewController()
+        infoVC.movie = pick
+        self.navigationController?.pushViewController(infoVC, animated: true)
     }
 
     @objc private func openGenrePicker() {
@@ -231,9 +231,9 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
     // MARK: - UICollectionViewDelegate
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         let movie = movies[indexPath.row]
-        let episodeVC = EpisodeListViewController()
-        episodeVC.movie = movie
-        self.navigationController?.pushViewController(episodeVC, animated: true)
+        let infoVC = MovieInfoViewController()
+        infoVC.movie = movie
+        self.navigationController?.pushViewController(infoVC, animated: true)
     }
 }
 

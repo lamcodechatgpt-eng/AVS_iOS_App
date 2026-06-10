@@ -13,6 +13,16 @@ struct Episode: Codable {
     var episodeId: String?
 }
 
+/// Thông tin chi tiết phim hiện ở MovieInfoVC. Tách khỏi Movie (list) để
+/// fetch lazy chỉ khi user mở phim cụ thể.
+struct MovieDetails: Codable {
+    var description: String
+    var year: String
+    var rating: String
+    var bannerUrl: String
+    var genres: [String]
+}
+
 /// Luồng phim cùng với URL Referer dùng để gọi server stream (m3u8 thường yêu cầu
 /// header Referer khớp với origin iframe player, không có là server trả 403).
 /// Khi `inlinePlaylist` có giá trị, đó là nội dung m3u8 đã được decode sẵn (từ

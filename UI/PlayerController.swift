@@ -5,6 +5,10 @@ class PlayerController: UIViewController {
     var episodeUrl: String! // Truyền link tập phim từ UI vào đây
     var episodes: [Episode] = []        // Toàn bộ danh sách tập của phim hiện tại
     var currentIndex: Int = 0           // Vị trí tập đang phát trong `episodes`
+    var movie: Movie?                   // Phim đang xem (để ghi lịch sử / favorite)
+
+    private var periodicTimeToken: Any?
+    private var resumeStatusObservation: NSKeyValueObservation?
 
     private let activityIndicator = UIActivityIndicatorView(style: .large)
     private let statusLabel = UILabel()
@@ -39,6 +43,19 @@ class PlayerController: UIViewController {
         setupLoadingUI()
         setupOverlayControls()
         startResolve()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Lưu vị trí cuối cùng. KHÔNG pause vì PiP cần tiếp tục chạy.
+        if let player = currentPlayer, !episodeUrl.isEmpty {
+            let secs = CMTimeGetSeconds(player.currentTime())
+            if secs.isFinite { PlaybackStore.shared.savePosition(secs, for: episodeUrl) }
+        }
+        if let token = periodicTimeToken {
+            currentPlayer?.removeTimeObserver(token)
+            periodicTimeToken = nil
+        }
     }
 
     deinit {
@@ -268,6 +285,40 @@ class PlayerController: UIViewController {
 
         // Đem overlay buttons lên trên player view và bật hiển thị.
         showOverlayControls(true)
+
+        // Seek-to-resume khi user quay lại tập đang xem dở.
+        // Quan sát readyToPlay rồi seek (không seek trước khi item ready).
+        let savedPosition = PlaybackStore.shared.position(for: episodeUrl)
+        if let pos = savedPosition, pos > 30 {
+            let token = item.observe(\.status, options: [.new]) { [weak item, weak self] obs, _ in
+                guard obs.status == .readyToPlay, let item = item else { return }
+                let duration = CMTimeGetSeconds(item.duration)
+                // Đừng seek nếu gần cuối (< 30s) — coi như đã xem xong
+                guard duration.isFinite && duration > 0 && pos < duration - 30 else { return }
+                item.seek(to: CMTime(seconds: pos, preferredTimescale: 600)) { _ in
+                    Logger.shared.log("[Resume] Tua tới \(Int(pos))s (đã lưu trước đó)")
+                }
+                self?.resumeStatusObservation = nil
+            }
+            resumeStatusObservation = token
+        }
+
+        // Lưu vị trí mỗi 5s.
+        let interval = CMTime(seconds: 5, preferredTimescale: 600)
+        periodicTimeToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            guard let self = self else { return }
+            let secs = CMTimeGetSeconds(time)
+            if secs.isFinite {
+                PlaybackStore.shared.savePosition(secs, for: self.episodeUrl)
+            }
+        }
+
+        // Ghi lịch sử (movie + episode index + title)
+        if let movie = movie, currentIndex < episodes.count {
+            PlaybackStore.shared.recordWatch(movie: movie,
+                                             episodeIndex: currentIndex,
+                                             episodeTitle: episodes[currentIndex].title)
+        }
 
         player.play()
     }
