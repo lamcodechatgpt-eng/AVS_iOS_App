@@ -24,21 +24,42 @@ class PlayerController: UIViewController {
     }
 
     deinit {
+        phaseTimer?.invalidate()
         statusObservation?.invalidate()
         if let o = errorObserver { NotificationCenter.default.removeObserver(o) }
         if let o = stallObserver { NotificationCenter.default.removeObserver(o) }
     }
 
+    private var resolveStartTime: Date?
+    private var phaseTimer: Timer?
+
     private func startResolve() {
         activityIndicator.startAnimating()
-        statusLabel.text = "Đang tải luồng phim..."
+        statusLabel.text = "Đang tải trang xem phim..."
+        statusLabel.isHidden = false
         logTextView.isHidden = true
         copyButton.isHidden = true
         retryButton.isHidden = true
 
+        // Update text mỗi 4s để user biết app vẫn đang chạy.
+        resolveStartTime = Date()
+        phaseTimer?.invalidate()
+        phaseTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+            guard let self = self, let start = self.resolveStartTime else { return }
+            let elapsed = Int(Date().timeIntervalSince(start))
+            switch elapsed {
+            case 0..<6: self.statusLabel.text = "Đang tải trang xem phim... (\(elapsed)s)"
+            case 6..<14: self.statusLabel.text = "Đang vào iframe player... (\(elapsed)s)"
+            case 14..<26: self.statusLabel.text = "Đang chờ player fetch luồng m3u8... (\(elapsed)s)"
+            default: self.statusLabel.text = "Sắp hết giờ — sẽ hiển thị log nếu không bóc được (\(elapsed)s)"
+            }
+        }
+
         Extractor.resolveStream(episodeUrl: episodeUrl) { [weak self] stream in
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                self.phaseTimer?.invalidate()
+                self.phaseTimer = nil
                 self.activityIndicator.stopAnimating()
 
                 guard let stream = stream else {
@@ -48,6 +69,8 @@ class PlayerController: UIViewController {
                 }
 
                 Logger.shared.log("[PlayerController] Tạo AVPlayer với m3u8=\(stream.url.absoluteString) referer=\(stream.referer)")
+                self.statusLabel.text = "Đang xác minh server stream..."
+                self.activityIndicator.startAnimating()
                 self.preflightAndAttach(stream: stream)
             }
         }
@@ -59,11 +82,18 @@ class PlayerController: UIViewController {
     private func preflightAndAttach(stream: Stream) {
         var req = URLRequest(url: stream.url)
         req.httpMethod = "HEAD"
-        req.timeoutInterval = 8
+        req.timeoutInterval = 5
         req.setValue(stream.referer, forHTTPHeaderField: "Referer")
         req.setValue(String(stream.referer.dropLast()), forHTTPHeaderField: "Origin")
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
-        URLSession.shared.dataTask(with: req) { _, resp, err in
+
+        // Session riêng để timeout chặt, không dùng URLSession.shared (60s default).
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 5
+        config.timeoutIntervalForResource = 8
+        let session = URLSession(configuration: config)
+
+        session.dataTask(with: req) { _, resp, err in
             DispatchQueue.main.async {
                 if let err = err {
                     Logger.shared.log("[Preflight] LỖI mạng: \(err.localizedDescription)")
@@ -75,7 +105,7 @@ class PlayerController: UIViewController {
                         Logger.shared.log("[Preflight] 404 — link m3u8 đã hết hạn hoặc URL sai.")
                     }
                 }
-                // Vẫn thử attach để có log AVPlayer cho dù preflight có lỗi.
+                self.activityIndicator.stopAnimating()
                 self.attachPlayer(for: stream)
             }
         }.resume()

@@ -282,7 +282,17 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     || path.contains("xem-phim")
                     || path.contains("-tap-")
                     || path.contains("/tap-")
-                let retries = isWatchLike ? 40 : 10
+                // Iframe player: 20s đủ để JWPlayer khởi động + bắt m3u8. Lâu hơn cũng vô ích —
+                // nếu chưa fetch luồng trong 20s thì khả năng cao là CF Turnstile chặn hoặc
+                // player không khởi động. Watch page AVS chỉ cần 15s để PLAYER_DATA hiện ra.
+                let retries: Int
+                if waitForIframe {
+                    retries = 20
+                } else if isWatchLike {
+                    retries = 15
+                } else {
+                    retries = 10
+                }
                 self.checkDOM(webView: self.webView, loadId: loadId, retries: retries, waitForIframe: waitForIframe)
             }
         }
@@ -303,10 +313,41 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         if loadId != self.currentLoadId { return }
         
         if retries <= 0 {
-            let queue = self.completionQueue
-            self.completionQueue.removeAll()
-            for completion in queue {
-                completion("")
+            // Hết retry. Lấy HTML hiện tại (không phải rỗng) + diagnostic để Extractor
+            // có thể log snippet quanh các keyword, biết tại sao JWPlayer không khởi động.
+            webView.evaluateJavaScript("document.documentElement.outerHTML") { [weak self] htmlResult, _ in
+                let html = (htmlResult as? String) ?? ""
+                guard let self = self else { return }
+                Logger.shared.log("[checkDOM] Hết retry. HTML hiện tại dài \(html.count) ký tự.")
+                let diagJS = """
+                JSON.stringify({
+                    path: window.location.pathname,
+                    host: window.location.host,
+                    title: document.title,
+                    bodyLen: (document.body && document.body.innerHTML || '').length,
+                    scripts: [].slice.call(document.scripts).map(function(s){return s.src||'(inline)'}).slice(0, 30),
+                    videoCount: document.querySelectorAll('video').length,
+                    videoSrc: (document.querySelector('video')||{}).src || '',
+                    sourceCount: document.querySelectorAll('source').length,
+                    sourceSrc: (document.querySelector('source')||{}).src || '',
+                    iframeCount: document.querySelectorAll('iframe').length,
+                    iframeSrc: (document.querySelector('iframe')||{}).src || '',
+                    hasJwplayer: typeof jwplayer === 'function',
+                    hasJwInstance: (typeof jwplayer === 'function') ? !!jwplayer('player') : false,
+                    buttonsClicked: (document.querySelectorAll('button, .jw-icon-display, .play-button, .video-play-button').length),
+                    challengeText: (document.body && document.body.innerText || '').slice(0, 200)
+                })
+                """
+                webView.evaluateJavaScript(diagJS) { diagResult, _ in
+                    if let s = diagResult as? String {
+                        Logger.shared.log("[checkDOM] Diagnostic: \(s)")
+                    }
+                    let queue = self.completionQueue
+                    self.completionQueue.removeAll()
+                    for completion in queue {
+                        completion(html)
+                    }
+                }
             }
             return
         }

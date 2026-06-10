@@ -95,6 +95,8 @@ class Extractor {
                 Logger.shared.log("[Extractor] Iframe \(iframeUrl) trả về rỗng (CF challenge chưa giải xong?).")
                 return completion(nil)
             }
+            // Hết retry nhưng HTML có nội dung — fall through để regex tìm m3u8.
+            // Nếu vẫn không match, branch fail sẽ dump diagnostic.
             // Tìm file m3u8 trong source của iframe (dùng regex lỏng lẻo hơn để bắt cả file: "...", src="...", source: '...')
             let pattern = "(?i)[\"'](https?://[^\"\'\\s]+?\\.m3u8[^\"\'\\s]*)[\"']"
             if let regex = try? NSRegularExpression(pattern: pattern),
