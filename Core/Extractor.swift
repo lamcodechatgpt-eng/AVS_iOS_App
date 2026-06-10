@@ -118,11 +118,12 @@ class Extractor {
             // với client không qua anti-bot luôn trả 403/429 — cờ này mới là luồng thật.
             if html.contains("videoData: present") || html.range(of: "data:application/vnd.apple.mpegurl", options: .caseInsensitive) != nil {
                 NetworkManager.shared.fetchVideoSrc { videoSrc in
-                    if let url = handleVideoSrc(videoSrc) {
-                        Logger.shared.log("[Extractor] Bóc m3u8 từ <video> data URL → \(url.path) (\(url.absoluteString.count) ký tự)")
-                        // File:// URL → AVPlayer không cần Referer; segment Google Photos
-                        // public không check Referer.
-                        completion(Stream(url: url, referer: referer))
+                    if let data = handleVideoSrcData(videoSrc) {
+                        // Trả về Stream với inlinePlaylist — PlayerController sẽ serve
+                        // qua custom URL scheme + Resource Loader để AVPlayer chắc chắn
+                        // nhận diện HLS (file:// thường không trigger HLS path trong AVPlayer).
+                        Logger.shared.log("[Extractor] Trả về Stream với inlinePlaylist (\(data.count) bytes)")
+                        completion(Stream(url: M3U8ResourceLoader.makePlaceholderURL(), referer: referer, inlinePlaylist: data))
                     } else {
                         Logger.shared.log("[Extractor] Có dấu hiệu video data URL nhưng không lấy được src — fall back regex.")
                         regexExtractM3U8(html: html, iframeUrl: iframeUrl, referer: referer, completion: completion)
@@ -136,16 +137,16 @@ class Extractor {
         }
     }
 
-    /// Decode data URL m3u8 (base64) → ghi ra file tạm → trả về file:// URL.
-    /// Trả nil nếu src không phải data URL HLS hoặc decode thất bại.
-    private static func handleVideoSrc(_ src: String) -> URL? {
+    /// Decode data URL m3u8 (base64) → trả về Data thô để PlayerController serve qua
+    /// AVAssetResourceLoaderDelegate. Trả nil nếu src không phải data URL HLS hoặc
+    /// decode thất bại.
+    private static func handleVideoSrcData(_ src: String) -> Data? {
         guard src.lowercased().hasPrefix("data:") else { return nil }
         let lc = src.lowercased()
         let isHLS = lc.contains("application/vnd.apple.mpegurl")
             || lc.contains("application/x-mpegurl")
             || lc.contains("audio/mpegurl")
         guard isHLS else { return nil }
-        // data:application/vnd.apple.mpegurl;base64,XXXXX
         guard let commaIdx = src.firstIndex(of: ","), let semiIdx = src.firstIndex(of: ";") else { return nil }
         let metaRange = src.index(after: semiIdx)..<commaIdx
         let isBase64 = src[metaRange].lowercased().contains("base64")
@@ -160,26 +161,17 @@ class Extractor {
             Logger.shared.log("[Extractor] Decode data URL thất bại (\(payload.prefix(40))...)")
             return nil
         }
-        let tmpDir = FileManager.default.temporaryDirectory
-        let fileURL = tmpDir.appendingPathComponent("avs-\(Int(Date().timeIntervalSince1970)).m3u8")
-        do {
-            try data.write(to: fileURL, options: .atomic)
-            // Log nội dung m3u8 đã decode để xác minh format đúng và đếm segment.
-            if let text = String(data: data, encoding: .utf8) {
-                let segmentLines = text.split(separator: "\n").filter { $0.hasPrefix("http") }
-                Logger.shared.log("[Extractor] M3U8 decoded \(data.count) bytes, \(segmentLines.count) segments")
-                Logger.shared.log("[Extractor] M3U8 đầu file: \(text.prefix(300))")
-                if let firstSeg = segmentLines.first {
-                    Logger.shared.log("[Extractor] Segment đầu: \(firstSeg.prefix(180))")
-                }
-            } else {
-                Logger.shared.log("[Extractor] CẢNH BÁO: m3u8 không decode UTF-8 được — có thể base64 sai.")
+        if let text = String(data: data, encoding: .utf8) {
+            let segmentLines = text.split(separator: "\n").filter { $0.hasPrefix("http") }
+            Logger.shared.log("[Extractor] M3U8 decoded \(data.count) bytes, \(segmentLines.count) segments")
+            Logger.shared.log("[Extractor] M3U8 đầu file: \(text.prefix(300))")
+            if let firstSeg = segmentLines.first {
+                Logger.shared.log("[Extractor] Segment đầu: \(firstSeg.prefix(180))")
             }
-            return fileURL
-        } catch {
-            Logger.shared.log("[Extractor] Ghi tmp m3u8 thất bại: \(error.localizedDescription)")
-            return nil
+        } else {
+            Logger.shared.log("[Extractor] CẢNH BÁO: m3u8 không decode UTF-8 được — base64 sai.")
         }
+        return data
     }
 
     private static func regexExtractM3U8(html: String, iframeUrl: String, referer: String, completion: @escaping (Stream?) -> Void) {

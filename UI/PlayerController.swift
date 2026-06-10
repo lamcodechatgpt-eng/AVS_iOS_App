@@ -16,6 +16,7 @@ class PlayerController: UIViewController {
     private var accessLogObserver: NSObjectProtocol?
     private var errorLogObserver: NSObjectProtocol?
     private var diagTimer: Timer?
+    private var m3u8Loader: M3U8ResourceLoader?
     private weak var currentPlayerItem: AVPlayerItem?
 
     override func viewDidLoad() {
@@ -119,13 +120,20 @@ class PlayerController: UIViewController {
     }
 
     private func attachPlayer(for stream: Stream) {
-        // Khi luồng đến từ file:// (đã decode data URL), KHÔNG set Referer/UA —
-        // những header này áp xuống tất cả segment requests và Google Photos đôi khi
-        // trả khác nhau tuỳ Referer. Để rỗng cho an toàn.
-        let isLocalFile = stream.url.isFileURL
-        let assetOptions: [String: Any]
-        if isLocalFile {
-            assetOptions = [:]
+        let asset: AVURLAsset
+        if let playlistData = stream.inlinePlaylist {
+            // Phục vụ m3u8 từ memory qua AVAssetResourceLoaderDelegate. AVPlayer
+            // sẽ thấy custom scheme "avshls://" → gọi delegate, delegate trả nội dung
+            // playlist với Content-Type "application/vnd.apple.mpegurl" rõ ràng nên
+            // chắc chắn được parse như HLS. Segments trong playlist là HTTPS tuyệt đối
+            // → AVPlayer fetch trực tiếp.
+            asset = AVURLAsset(url: M3U8ResourceLoader.makePlaceholderURL(), options: nil)
+            let loader = M3U8ResourceLoader(payload: playlistData)
+            m3u8Loader = loader
+            asset.resourceLoader.setDelegate(loader, queue: .main)
+            Logger.shared.log("[PlayerController] Dùng ResourceLoader (\(playlistData.count) bytes m3u8 inline)")
+        } else if stream.url.isFileURL {
+            asset = AVURLAsset(url: stream.url, options: nil)
             Logger.shared.log("[PlayerController] Local file URL — không gắn HTTP headers")
         } else {
             let headers: [String: String] = [
@@ -133,9 +141,8 @@ class PlayerController: UIViewController {
                 "Origin": String(stream.referer.dropLast()),
                 "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
             ]
-            assetOptions = ["AVURLAssetHTTPHeaderFieldsKey": headers]
+            asset = AVURLAsset(url: stream.url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         }
-        let asset = AVURLAsset(url: stream.url, options: assetOptions)
         let item = AVPlayerItem(asset: asset)
         currentPlayerItem = item
 
@@ -334,6 +341,7 @@ class PlayerController: UIViewController {
     @objc private func retry() {
         // Gỡ player cũ + observer
         diagTimer?.invalidate(); diagTimer = nil
+        m3u8Loader = nil
         statusObservation?.invalidate()
         statusObservation = nil
         if let o = errorObserver { NotificationCenter.default.removeObserver(o); errorObserver = nil }
