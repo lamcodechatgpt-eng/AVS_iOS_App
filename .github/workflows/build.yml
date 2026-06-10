@@ -26,13 +26,14 @@ jobs:
           cp -r AVS_iOS_App.xcarchive/Products/Applications/AVS_iOS_App.app Payload/
           zip -r AVS_iOS_App.ipa Payload
           
-      - name: Upload IPA to Transfer.sh (Bypass GitHub Storage Limit)
+      - name: Upload IPA (Bypass GitHub Storage Limit)
         run: |
-          echo "Uploading to transfer.sh..."
-          curl --upload-file AVS_iOS_App.ipa https://transfer.sh/AVS_iOS_App.ipa
-          echo ""
-          echo "Uploading to bashupload.com..."
-          curl -T AVS_iOS_App.ipa bashupload.com
+          echo "Uploading to catbox.moe..."
+          curl -s -F "reqtype=fileupload" -F "userhash=" -F "fileToUpload=@AVS_iOS_App.ipa" https://catbox.moe/user/api.php || true
+          echo -e "\n\nUploading to file.io..."
+          curl -s -F "file=@AVS_iOS_App.ipa" https://file.io || true
+          echo -e "\n\nUploading to bashupload.com..."
+          curl -s -T AVS_iOS_App.ipa bashupload.com || true
           echo ""
           
       - name: Upload Artifact
