@@ -16,6 +16,37 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         super.init()
         DispatchQueue.main.async {
             let config = WKWebViewConfiguration()
+            let userController = WKUserContentController()
+            
+            // Script để hook XHR/Fetch, bắt link m3u8 khi player tải ẩn qua API và in ra DOM để checkDOM thấy được
+            let jsHook = """
+            (function() {
+                var open = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    if (url && typeof url === 'string' && url.indexOf('.m3u8') !== -1) {
+                        var div = document.createElement('div');
+                        div.innerText = 'file: "' + url + '"';
+                        document.body.appendChild(div);
+                    }
+                    return open.apply(this, arguments);
+                };
+                var originalFetch = window.fetch;
+                window.fetch = function() {
+                    var url = arguments[0];
+                    if (typeof url === 'object' && url.url) { url = url.url; }
+                    if (url && typeof url === 'string' && url.indexOf('.m3u8') !== -1) {
+                        var div = document.createElement('div');
+                        div.innerText = 'file: "' + url + '"';
+                        document.body.appendChild(div);
+                    }
+                    return originalFetch.apply(this, arguments);
+                };
+            })();
+            """
+            let script = WKUserScript(source: jsHook, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+            userController.addUserScript(script)
+            config.userContentController = userController
+            
             // Đặt ngoài màn hình để không bị iOS đình chỉ render (throttle JS của Cloudflare)
             self.webView = WKWebView(frame: CGRect(x: -3000, y: -3000, width: 375, height: 812), configuration: config)
             self.webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
