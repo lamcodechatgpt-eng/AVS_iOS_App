@@ -17,12 +17,16 @@ class PlayerController: UIViewController {
     private let retryButton = UIButton(type: .system)
 
     // Overlay điều khiển
+    private let controlsContainer = UIView()
     private let skipBackwardButton = UIButton(type: .system)
     private let skipForwardButton = UIButton(type: .system)
     private let skipIntroButton = UIButton(type: .system)
     private let episodePickerButton = UIButton(type: .system)
     private let nextEpisodeButton = UIButton(type: .system)
     private let speedButton = UIButton(type: .system)
+    private let closeButton = UIButton(type: .system)
+    private var controlsVisible = true
+    private var controlsTimer: Timer?
     private weak var currentPlayer: AVPlayer?
     private weak var currentPlayerVC: AVPlayerViewController?
 
@@ -283,7 +287,7 @@ class PlayerController: UIViewController {
         copyButton.isHidden = true
         retryButton.isHidden = true
 
-        // Đem overlay buttons lên trên player view và bật hiển thị.
+        view.bringSubviewToFront(controlsContainer)
         showOverlayControls(true)
 
         // Seek-to-resume khi user quay lại tập đang xem dở.
@@ -353,28 +357,28 @@ class PlayerController: UIViewController {
         activityIndicator.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(activityIndicator)
 
-        statusLabel.text = "Đang tải luồng phim..."
+        statusLabel.text = "Đang tải..."
         statusLabel.textColor = .white
-        statusLabel.font = .systemFont(ofSize: 15)
+        statusLabel.font = .systemFont(ofSize: 15, weight: .medium)
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(statusLabel)
 
-        logTextView.backgroundColor = UIColor(white: 0.1, alpha: 1.0)
+        logTextView.backgroundColor = UIColor(white: 0.1, alpha: 0.95)
         logTextView.textColor = .white
         logTextView.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         logTextView.isEditable = false
         logTextView.isHidden = true
         logTextView.translatesAutoresizingMaskIntoConstraints = false
-        logTextView.layer.cornerRadius = 6
+        logTextView.layer.cornerRadius = 8
         view.addSubview(logTextView)
 
         copyButton.setTitle("Copy log", for: .normal)
         copyButton.setTitleColor(.white, for: .normal)
         copyButton.backgroundColor = .systemBlue
-        copyButton.layer.cornerRadius = 6
-        copyButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        copyButton.layer.cornerRadius = 8
+        copyButton.contentEdgeInsets = UIEdgeInsets(top: 10, left: 20, bottom: 10, right: 20)
         copyButton.translatesAutoresizingMaskIntoConstraints = false
         copyButton.isHidden = true
         copyButton.addTarget(self, action: #selector(copyLogs), for: .touchUpInside)
@@ -382,9 +386,9 @@ class PlayerController: UIViewController {
 
         retryButton.setTitle("Thử lại", for: .normal)
         retryButton.setTitleColor(.white, for: .normal)
-        retryButton.backgroundColor = .systemGray
-        retryButton.layer.cornerRadius = 6
-        retryButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        retryButton.backgroundColor = UIColor.white.withAlphaComponent(0.2)
+        retryButton.layer.cornerRadius = 8
+        retryButton.contentEdgeInsets = UIEdgeInsets(top: 10, left: 20, bottom: 10, right: 20)
         retryButton.translatesAutoresizingMaskIntoConstraints = false
         retryButton.isHidden = true
         retryButton.addTarget(self, action: #selector(retry), for: .touchUpInside)
@@ -392,22 +396,23 @@ class PlayerController: UIViewController {
 
         NSLayoutConstraint.activate([
             activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            activityIndicator.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 40),
+            activityIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -40),
 
             statusLabel.topAnchor.constraint(equalTo: activityIndicator.bottomAnchor, constant: 16),
-            statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            statusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
 
-            logTextView.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 12),
-            logTextView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            logTextView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            logTextView.bottomAnchor.constraint(equalTo: copyButton.topAnchor, constant: -12),
+            logTextView.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 16),
+            logTextView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            logTextView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            logTextView.bottomAnchor.constraint(equalTo: copyButton.topAnchor, constant: -16),
 
             copyButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            copyButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            copyButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
 
             retryButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            retryButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12)
+            retryButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20)
         ])
 
         activityIndicator.startAnimating()
@@ -445,62 +450,130 @@ class PlayerController: UIViewController {
     // MARK: - Overlay controls (skip / next / episode picker)
 
     private func setupOverlayControls() {
-        // Cụm nút giữa: -10s, +10s, +90s (skip intro).
-        let buttons: [(UIButton, String, Selector)] = [
-            (skipBackwardButton, "⟲ 10", #selector(skipBackward)),
-            (skipForwardButton, "10 ⟳", #selector(skipForward)),
-            (skipIntroButton, "+1:30", #selector(skipIntro))
-        ]
-        for (btn, title, sel) in buttons {
-            configureOverlayButton(btn, title: title, action: sel)
-        }
-        configureOverlayButton(episodePickerButton, title: "📺", action: #selector(showEpisodePicker))
-        configureOverlayButton(nextEpisodeButton, title: "Tập sau ▶", action: #selector(skipToNextEpisode))
-        configureOverlayButton(speedButton, title: "1x", action: #selector(showSpeedPicker))
+        controlsContainer.translatesAutoresizingMaskIntoConstraints = false
+        controlsContainer.isHidden = true
+        view.addSubview(controlsContainer)
 
-        let centerStack = UIStackView(arrangedSubviews: [skipBackwardButton, skipIntroButton, skipForwardButton])
-        centerStack.axis = .horizontal
-        centerStack.spacing = 12
-        centerStack.distribution = .fillEqually
-        centerStack.translatesAutoresizingMaskIntoConstraints = false
-        centerStack.isHidden = true
-        view.addSubview(centerStack)
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(toggleControls))
+        controlsContainer.addGestureRecognizer(tapGesture)
 
-        let topStack = UIStackView(arrangedSubviews: [speedButton, episodePickerButton, nextEpisodeButton])
-        topStack.axis = .horizontal
-        topStack.spacing = 8
-        topStack.translatesAutoresizingMaskIntoConstraints = false
-        topStack.isHidden = true
-        view.addSubview(topStack)
+        // Top bar: speed + episode picker + next
+        configureIconButton(episodePickerButton, icon: "list.bullet.rectangle", action: #selector(showEpisodePicker))
+        configureIconButton(nextEpisodeButton, icon: "forward.fill", action: #selector(skipToNextEpisode))
+        configureIconButton(speedButton, icon: "speedometer", action: #selector(showSpeedPicker))
+        configureIconButton(closeButton, icon: "xmark", action: #selector(closePlayer))
+
+        let topBar = UIStackView(arrangedSubviews: [speedButton, episodePickerButton, nextEpisodeButton])
+        topBar.axis = .horizontal
+        topBar.spacing = 12
+        topBar.translatesAutoresizingMaskIntoConstraints = false
+        controlsContainer.addSubview(topBar)
+
+        // Center skip buttons
+        configureSkipButton(skipBackwardButton, icon: "gobackward.10", action: #selector(skipBackward))
+        configureSkipButton(skipForwardButton, icon: "goforward.10", action: #selector(skipForward))
+        configureSkipButton(skipIntroButton, icon: "goforward.90", action: #selector(skipIntro))
+
+        let centerRow = UIStackView(arrangedSubviews: [skipBackwardButton, skipForwardButton, skipIntroButton])
+        centerRow.axis = .horizontal
+        centerRow.spacing = 24
+        centerRow.distribution = .equalSpacing
+        centerRow.translatesAutoresizingMaskIntoConstraints = false
+        controlsContainer.addSubview(centerRow)
+
+        // Close button top-left
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        controlsContainer.addSubview(closeButton)
 
         NSLayoutConstraint.activate([
-            centerStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            centerStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -80),
-            topStack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
-            topStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12)
+            controlsContainer.topAnchor.constraint(equalTo: view.topAnchor),
+            controlsContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            controlsContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            controlsContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            topBar.topAnchor.constraint(equalTo: controlsContainer.safeAreaLayoutGuide.topAnchor, constant: 8),
+            topBar.trailingAnchor.constraint(equalTo: controlsContainer.trailingAnchor, constant: -16),
+
+            centerRow.centerXAnchor.constraint(equalTo: controlsContainer.centerXAnchor),
+            centerRow.bottomAnchor.constraint(equalTo: controlsContainer.safeAreaLayoutGuide.bottomAnchor, constant: -100),
+
+            closeButton.topAnchor.constraint(equalTo: controlsContainer.safeAreaLayoutGuide.topAnchor, constant: 8),
+            closeButton.leadingAnchor.constraint(equalTo: controlsContainer.leadingAnchor, constant: 16)
         ])
 
-        overlayStacks = [centerStack, topStack]
+        updateButtonVisibility()
     }
 
-    private var overlayStacks: [UIStackView] = []
-
-    private func configureOverlayButton(_ btn: UIButton, title: String, action: Selector) {
-        btn.setTitle(title, for: .normal)
-        btn.setTitleColor(.white, for: .normal)
-        btn.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
-        btn.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-        btn.layer.cornerRadius = 8
-        btn.contentEdgeInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+    private func configureIconButton(_ btn: UIButton, icon: String, action: Selector) {
+        let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+        btn.setImage(UIImage(systemName: icon, withConfiguration: config), for: .normal)
+        btn.tintColor = .white
+        btn.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        btn.layer.cornerRadius = 22
+        btn.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
         btn.addTarget(self, action: action, for: .touchUpInside)
+        btn.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        btn.heightAnchor.constraint(equalToConstant: 44).isActive = true
+    }
+
+    private func configureSkipButton(_ btn: UIButton, icon: String, action: Selector) {
+        let config = UIImage.SymbolConfiguration(pointSize: 28, weight: .semibold)
+        btn.setImage(UIImage(systemName: icon, withConfiguration: config), for: .normal)
+        btn.tintColor = .white
+        btn.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+        btn.layer.cornerRadius = 36
+        btn.frame = CGRect(x: 0, y: 0, width: 72, height: 72)
+        btn.addTarget(self, action: action, for: .touchUpInside)
+        btn.widthAnchor.constraint(equalToConstant: 72).isActive = true
+        btn.heightAnchor.constraint(equalToConstant: 72).isActive = true
     }
 
     private func showOverlayControls(_ show: Bool) {
-        overlayStacks.forEach { $0.isHidden = !show }
-        overlayStacks.forEach { view.bringSubviewToFront($0) }
-        // Ẩn nút "Tập sau" nếu đã ở tập cuối.
-        nextEpisodeButton.isHidden = !(show && currentIndex + 1 < episodes.count)
-        episodePickerButton.isHidden = !(show && episodes.count > 1)
+        controlsVisible = show
+        controlsContainer.isHidden = !show
+        if show { startControlsTimer() }
+        updateButtonVisibility()
+    }
+
+    private func updateButtonVisibility() {
+        nextEpisodeButton.isHidden = !(controlsVisible && currentIndex + 1 < episodes.count)
+        episodePickerButton.isHidden = !(controlsVisible && episodes.count > 1)
+    }
+
+    private func startControlsTimer() {
+        controlsTimer?.invalidate()
+        controlsTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in
+            guard let self = self, self.controlsVisible else { return }
+            UIView.animate(withDuration: 0.3) {
+                self.controlsContainer.alpha = 0
+            } completion: { _ in
+                self.controlsContainer.isHidden = true
+                self.controlsVisible = false
+                self.controlsContainer.alpha = 1
+            }
+        }
+    }
+
+    @objc private func toggleControls() {
+        if controlsVisible {
+            UIView.animate(withDuration: 0.3) {
+                self.controlsContainer.alpha = 0
+            } completion: { _ in
+                self.controlsContainer.isHidden = true
+                self.controlsVisible = false
+                self.controlsContainer.alpha = 1
+            }
+            controlsTimer?.invalidate()
+        } else {
+            controlsVisible = true
+            controlsContainer.isHidden = false
+            controlsContainer.alpha = 1
+            startControlsTimer()
+        }
+    }
+
+    @objc private func closePlayer() {
+        navigationController?.popViewController(animated: true)
     }
 
     @objc private func skipBackward() { seek(by: -10) }
@@ -521,20 +594,17 @@ class PlayerController: UIViewController {
 
     @objc private func showSpeedPicker() {
         let speeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
-        let sheet = UIAlertController(title: "Tốc độ phát", message: nil, preferredStyle: .actionSheet)
-        for s in speeds {
-            let label = s == 1.0 ? "1x (thường)" : "\(s)x"
-            sheet.addAction(UIAlertAction(title: label, style: .default) { [weak self] _ in
-                self?.currentPlayer?.rate = s
-                self?.speedButton.setTitle("\(s)x", for: .normal)
-            })
+        let picker = SpeedPickerViewController()
+        picker.speeds = speeds
+        picker.currentSpeed = currentPlayer?.rate ?? 1.0
+        picker.onSelect = { [weak self] speed in
+            self?.currentPlayer?.rate = speed
         }
-        sheet.addAction(UIAlertAction(title: "Đóng", style: .cancel))
-        if let pop = sheet.popoverPresentationController {
-            pop.sourceView = speedButton
-            pop.sourceRect = speedButton.bounds
+        if let sheet = picker.sheetPresentationController {
+            sheet.detents = [.height(320)]
+            sheet.prefersGrabberVisible = true
         }
-        present(sheet, animated: true)
+        present(picker, animated: true)
     }
 
     private func playNextEpisodeIfAvailable() {
@@ -551,21 +621,188 @@ class PlayerController: UIViewController {
 
     @objc private func showEpisodePicker() {
         guard !episodes.isEmpty else { return }
-        let alert = UIAlertController(title: "Chọn tập", message: nil, preferredStyle: .actionSheet)
-        for (idx, ep) in episodes.enumerated() {
-            let title = idx == currentIndex ? "▶ \(ep.title)" : ep.title
-            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
-                guard let self = self, idx != self.currentIndex else { return }
-                self.currentIndex = idx
-                self.episodeUrl = ep.link
-                self.retry()
-            })
+        let pickerVC = EpisodePickerViewController()
+        pickerVC.episodes = episodes
+        pickerVC.currentIndex = currentIndex
+        pickerVC.onSelect = { [weak self] idx in
+            guard let self = self, idx != self.currentIndex else { return }
+            self.currentIndex = idx
+            self.episodeUrl = self.episodes[idx].link
+            self.dismiss(animated: true)
+            self.retry()
         }
-        alert.addAction(UIAlertAction(title: "Đóng", style: .cancel))
-        if let pop = alert.popoverPresentationController {
-            pop.sourceView = episodePickerButton
-            pop.sourceRect = episodePickerButton.bounds
+        if let sheet = pickerVC.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+            sheet.prefersEdgeAttachedInCompactHeight = true
         }
-        present(alert, animated: true)
+        present(pickerVC, animated: true)
+    }
+}
+
+// MARK: - Episode Picker
+
+final class EpisodePickerViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
+
+    var episodes: [Episode] = []
+    var currentIndex: Int = 0
+    var onSelect: ((Int) -> Void)?
+
+    private let titleLabel = UILabel()
+    private var collectionView: UICollectionView!
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+
+        titleLabel.text = "Chọn tập"
+        titleLabel.font = .systemFont(ofSize: 17, weight: .bold)
+        titleLabel.textAlignment = .center
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(titleLabel)
+
+        let layout = UICollectionViewFlowLayout()
+        let columns: CGFloat = 5
+        let spacing: CGFloat = 8
+        let insets: CGFloat = 16
+        let totalSpacing = insets * 2 + spacing * (columns - 1)
+        let cellWidth = (view.bounds.width - totalSpacing) / columns
+        layout.itemSize = CGSize(width: cellWidth, height: 44)
+        layout.minimumLineSpacing = spacing
+        layout.minimumInteritemSpacing = spacing
+        layout.sectionInset = UIEdgeInsets(top: 8, left: insets, bottom: 16, right: insets)
+
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        collectionView.backgroundColor = .clear
+        collectionView.dataSource = self
+        collectionView.delegate = self
+        collectionView.register(EpisodePickerCell.self, forCellWithReuseIdentifier: "Cell")
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(collectionView)
+
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+
+            collectionView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { episodes.count }
+
+    func collectionView(_ cv: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        let cell = cv.dequeueReusableCell(withReuseIdentifier: "Cell", for: indexPath) as! EpisodePickerCell
+        let isCurrent = indexPath.row == currentIndex
+        let ep = episodes[indexPath.row]
+        cell.configure(number: indexPath.row + 1, isCurrent: isCurrent, title: ep.title)
+        return cell
+    }
+
+    func collectionView(_ cv: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        onSelect?(indexPath.row)
+    }
+}
+
+final class EpisodePickerCell: UICollectionViewCell {
+    private let label = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentView.layer.cornerRadius = 10
+        contentView.clipsToBounds = true
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.textAlignment = .center
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.7
+        label.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
+            label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
+            label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func configure(number: Int, isCurrent: Bool, title: String) {
+        if isCurrent {
+            contentView.backgroundColor = UIColor.systemRed
+            label.textColor = .white
+            label.font = .systemFont(ofSize: 13, weight: .bold)
+            label.text = "▶ \(number)"
+        } else {
+            contentView.backgroundColor = .secondarySystemBackground
+            label.textColor = .label
+            label.font = .systemFont(ofSize: 13, weight: .semibold)
+            label.text = "\(number)"
+        }
+    }
+}
+
+// MARK: - Speed Picker
+
+final class SpeedPickerViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
+
+    var speeds: [Float] = []
+    var currentSpeed: Float = 1.0
+    var onSelect: ((Float) -> Void)?
+
+    private let titleLabel = UILabel()
+    private let tableView = UITableView()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+
+        titleLabel.text = "Tốc độ phát"
+        titleLabel.font = .systemFont(ofSize: 17, weight: .bold)
+        titleLabel.textAlignment = .center
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(titleLabel)
+
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "Cell")
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.isScrollEnabled = false
+        tableView.separatorStyle = .singleLine
+        view.addSubview(tableView)
+
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+
+            tableView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { speeds.count }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
+        let speed = speeds[indexPath.row]
+        let isCurrent = abs(speed - currentSpeed) < 0.01
+        cell.textLabel?.text = speed == 1.0 ? "1x (thường)" : "\(speed)x"
+        cell.textLabel?.font = .systemFont(ofSize: 16, weight: isCurrent ? .bold : .regular)
+        cell.textLabel?.textColor = isCurrent ? .systemRed : .label
+        cell.accessoryType = isCurrent ? .checkmark : .none
+        cell.tintColor = .systemRed
+        cell.backgroundColor = .clear
+        return cell
+    }
+
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        onSelect?(speeds[indexPath.row])
+        dismiss(animated: true)
     }
 }
