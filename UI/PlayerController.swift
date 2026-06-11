@@ -454,6 +454,30 @@ class PlayerController: UIViewController {
         controlsContainer.isHidden = true
         view.addSubview(controlsContainer)
 
+        let gradientView = UIView()
+        gradientView.isUserInteractionEnabled = false
+        gradientView.translatesAutoresizingMaskIntoConstraints = false
+        controlsContainer.addSubview(gradientView)
+        controlsContainer.sendSubviewToBack(gradientView)
+        NSLayoutConstraint.activate([
+            gradientView.topAnchor.constraint(equalTo: controlsContainer.topAnchor),
+            gradientView.leadingAnchor.constraint(equalTo: controlsContainer.leadingAnchor),
+            gradientView.trailingAnchor.constraint(equalTo: controlsContainer.trailingAnchor),
+            gradientView.bottomAnchor.constraint(equalTo: controlsContainer.bottomAnchor)
+        ])
+        DispatchQueue.main.async {
+            let gradient = CAGradientLayer()
+            gradient.colors = [
+                UIColor.black.withAlphaComponent(0.35).cgColor,
+                UIColor.clear.cgColor,
+                UIColor.clear.cgColor,
+                UIColor.black.withAlphaComponent(0.25).cgColor
+            ]
+            gradient.locations = [0.0, 0.2, 0.75, 1.0]
+            gradient.frame = gradientView.bounds
+            gradientView.layer.addSublayer(gradient)
+        }
+
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(toggleControls))
         controlsContainer.addGestureRecognizer(tapGesture)
 
@@ -601,11 +625,7 @@ class PlayerController: UIViewController {
             self?.currentPlayer?.rate = speed
         }
         if let sheet = picker.sheetPresentationController {
-            if #available(iOS 16.0, *) {
-                sheet.detents = [.height(320)]
-            } else {
-                sheet.detents = [.medium()]
-            }
+            sheet.detents = [.medium()]
             sheet.prefersGrabberVisible = true
         }
         present(picker, animated: true)
@@ -636,11 +656,7 @@ class PlayerController: UIViewController {
             self.retry()
         }
         if let sheet = pickerVC.sheetPresentationController {
-            if #available(iOS 16.0, *) {
-                sheet.detents = [.height(360), .large()]
-            } else {
-                sheet.detents = [.medium(), .large()]
-            }
+            sheet.detents = [.medium(), .large()]
             sheet.prefersGrabberVisible = true
             sheet.prefersEdgeAttachedInCompactHeight = true
         }
