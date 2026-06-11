@@ -325,16 +325,14 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     || path.contains("xem-phim")
                     || path.contains("-tap-")
                     || path.contains("/tap-")
-                // Iframe player: 20s đủ để JWPlayer khởi động + bắt m3u8. Lâu hơn cũng vô ích —
-                // nếu chưa fetch luồng trong 20s thì khả năng cao là CF Turnstile chặn hoặc
-                // player không khởi động. Watch page AVS chỉ cần 15s để PLAYER_DATA hiện ra.
+                // Giảm số lần retry + poll nhanh hơn để load nhanh
                 let retries: Int
                 if waitForIframe {
-                    retries = 20
+                    retries = 16
                 } else if isWatchLike {
-                    retries = 15
-                } else {
                     retries = 10
+                } else {
+                    retries = 6
                 }
                 self.checkDOM(webView: self.webView, loadId: loadId, retries: retries, waitForIframe: waitForIframe)
             }
