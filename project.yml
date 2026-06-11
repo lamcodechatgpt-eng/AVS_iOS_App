@@ -9,6 +9,7 @@ targets:
     sources:
       - path: Core
       - path: UI
+      - path: Assets.xcassets
       - path: AppDelegate.swift
     info:
       path: Info.plist

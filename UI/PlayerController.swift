@@ -16,17 +16,12 @@ class PlayerController: UIViewController {
     private let copyButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
 
-    // Overlay điều khiển
-    private let controlsContainer = UIView()
-    private let skipBackwardButton = UIButton(type: .system)
-    private let skipForwardButton = UIButton(type: .system)
-    private let skipIntroButton = UIButton(type: .system)
+    // Overlay buttons — KHÔNG intercept touch, AVPlayer native controls vẫn hoạt động
     private let episodePickerButton = UIButton(type: .system)
     private let nextEpisodeButton = UIButton(type: .system)
     private let speedButton = UIButton(type: .system)
     private let closeButton = UIButton(type: .system)
-    private var controlsVisible = true
-    private var controlsTimer: Timer?
+    private let controlsStack = UIStackView()
     private weak var currentPlayer: AVPlayer?
     private weak var currentPlayerVC: AVPlayerViewController?
 
@@ -287,8 +282,8 @@ class PlayerController: UIViewController {
         copyButton.isHidden = true
         retryButton.isHidden = true
 
-        view.bringSubviewToFront(controlsContainer)
-        showOverlayControls(true)
+        view.bringSubviewToFront(closeButton)
+        view.bringSubviewToFront(controlsStack)
 
         // Seek-to-resume khi user quay lại tập đang xem dở.
         // Quan sát readyToPlay rồi seek (không seek trước khi item ready).
@@ -447,173 +442,72 @@ class PlayerController: UIViewController {
         startResolve()
     }
 
-    // MARK: - Overlay controls (skip / next / episode picker)
+    // MARK: - Overlay controls (non‑intrusive, không intercept touch)
 
     private func setupOverlayControls() {
-        controlsContainer.translatesAutoresizingMaskIntoConstraints = false
-        controlsContainer.isHidden = true
-        view.addSubview(controlsContainer)
-
-        let gradientView = UIView()
-        gradientView.isUserInteractionEnabled = false
-        gradientView.translatesAutoresizingMaskIntoConstraints = false
-        controlsContainer.addSubview(gradientView)
-        controlsContainer.sendSubviewToBack(gradientView)
-        NSLayoutConstraint.activate([
-            gradientView.topAnchor.constraint(equalTo: controlsContainer.topAnchor),
-            gradientView.leadingAnchor.constraint(equalTo: controlsContainer.leadingAnchor),
-            gradientView.trailingAnchor.constraint(equalTo: controlsContainer.trailingAnchor),
-            gradientView.bottomAnchor.constraint(equalTo: controlsContainer.bottomAnchor)
-        ])
-        DispatchQueue.main.async {
-            let gradient = CAGradientLayer()
-            gradient.colors = [
-                UIColor.black.withAlphaComponent(0.35).cgColor,
-                UIColor.clear.cgColor,
-                UIColor.clear.cgColor,
-                UIColor.black.withAlphaComponent(0.25).cgColor
-            ]
-            gradient.locations = [0.0, 0.2, 0.75, 1.0]
-            gradient.frame = gradientView.bounds
-            gradientView.layer.addSublayer(gradient)
-        }
-
-        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(toggleControls))
-        controlsContainer.addGestureRecognizer(tapGesture)
-
-        // Top bar: speed + episode picker + next
         configureIconButton(episodePickerButton, icon: "list.bullet.rectangle", action: #selector(showEpisodePicker))
         configureIconButton(nextEpisodeButton, icon: "forward.fill", action: #selector(skipToNextEpisode))
         configureIconButton(speedButton, icon: "speedometer", action: #selector(showSpeedPicker))
         configureIconButton(closeButton, icon: "xmark", action: #selector(closePlayer))
 
-        let topBar = UIStackView(arrangedSubviews: [speedButton, episodePickerButton, nextEpisodeButton])
-        topBar.axis = .horizontal
-        topBar.spacing = 12
-        topBar.translatesAutoresizingMaskIntoConstraints = false
-        controlsContainer.addSubview(topBar)
-
-        // Center skip buttons
-        configureSkipButton(skipBackwardButton, icon: "gobackward.10", action: #selector(skipBackward))
-        configureSkipButton(skipForwardButton, icon: "goforward.10", action: #selector(skipForward))
-        configureSkipButton(skipIntroButton, icon: "goforward.90", action: #selector(skipIntro))
-
-        let centerRow = UIStackView(arrangedSubviews: [skipBackwardButton, skipForwardButton, skipIntroButton])
-        centerRow.axis = .horizontal
-        centerRow.spacing = 24
-        centerRow.distribution = .equalSpacing
-        centerRow.translatesAutoresizingMaskIntoConstraints = false
-        controlsContainer.addSubview(centerRow)
-
-        // Close button top-left
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        controlsContainer.addSubview(closeButton)
+        view.addSubview(closeButton)
+
+        controlsStack.axis = .horizontal
+        controlsStack.spacing = 12
+        controlsStack.translatesAutoresizingMaskIntoConstraints = false
+        controlsStack.addArrangedSubview(speedButton)
+        controlsStack.addArrangedSubview(episodePickerButton)
+        controlsStack.addArrangedSubview(nextEpisodeButton)
+        view.addSubview(controlsStack)
 
         NSLayoutConstraint.activate([
-            controlsContainer.topAnchor.constraint(equalTo: view.topAnchor),
-            controlsContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            controlsContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            controlsContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            closeButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
 
-            topBar.topAnchor.constraint(equalTo: controlsContainer.safeAreaLayoutGuide.topAnchor, constant: 8),
-            topBar.trailingAnchor.constraint(equalTo: controlsContainer.trailingAnchor, constant: -16),
-
-            centerRow.centerXAnchor.constraint(equalTo: controlsContainer.centerXAnchor),
-            centerRow.bottomAnchor.constraint(equalTo: controlsContainer.safeAreaLayoutGuide.bottomAnchor, constant: -100),
-
-            closeButton.topAnchor.constraint(equalTo: controlsContainer.safeAreaLayoutGuide.topAnchor, constant: 8),
-            closeButton.leadingAnchor.constraint(equalTo: controlsContainer.leadingAnchor, constant: 16)
+            controlsStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            controlsStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
         ])
 
+        // AVPlayer native controls handle play/pause/seek —
+        // KHÔNG overlay container, KHÔNG intercept touch, KHÔNG auto‑hide.
         updateButtonVisibility()
     }
 
     private func configureIconButton(_ btn: UIButton, icon: String, action: Selector) {
-        let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+        let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
         btn.setImage(UIImage(systemName: icon, withConfiguration: config), for: .normal)
         btn.tintColor = .white
-        btn.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-        btn.layer.cornerRadius = 22
-        btn.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+        btn.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        btn.layer.cornerRadius = 18
         btn.addTarget(self, action: action, for: .touchUpInside)
-        btn.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        btn.heightAnchor.constraint(equalToConstant: 44).isActive = true
-    }
-
-    private func configureSkipButton(_ btn: UIButton, icon: String, action: Selector) {
-        let config = UIImage.SymbolConfiguration(pointSize: 28, weight: .semibold)
-        btn.setImage(UIImage(systemName: icon, withConfiguration: config), for: .normal)
-        btn.tintColor = .white
-        btn.backgroundColor = UIColor.black.withAlphaComponent(0.35)
-        btn.layer.cornerRadius = 36
-        btn.frame = CGRect(x: 0, y: 0, width: 72, height: 72)
-        btn.addTarget(self, action: action, for: .touchUpInside)
-        btn.widthAnchor.constraint(equalToConstant: 72).isActive = true
-        btn.heightAnchor.constraint(equalToConstant: 72).isActive = true
-    }
-
-    private func showOverlayControls(_ show: Bool) {
-        controlsVisible = show
-        controlsContainer.isHidden = !show
-        if show { startControlsTimer() }
-        updateButtonVisibility()
+        btn.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        btn.heightAnchor.constraint(equalToConstant: 36).isActive = true
     }
 
     private func updateButtonVisibility() {
-        nextEpisodeButton.isHidden = !(controlsVisible && currentIndex + 1 < episodes.count)
-        episodePickerButton.isHidden = !(controlsVisible && episodes.count > 1)
-    }
-
-    private func startControlsTimer() {
-        controlsTimer?.invalidate()
-        controlsTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in
-            guard let self = self, self.controlsVisible else { return }
-            UIView.animate(withDuration: 0.3) {
-                self.controlsContainer.alpha = 0
-            } completion: { _ in
-                self.controlsContainer.isHidden = true
-                self.controlsVisible = false
-                self.controlsContainer.alpha = 1
-            }
-        }
-    }
-
-    @objc private func toggleControls() {
-        if controlsVisible {
-            UIView.animate(withDuration: 0.3) {
-                self.controlsContainer.alpha = 0
-            } completion: { _ in
-                self.controlsContainer.isHidden = true
-                self.controlsVisible = false
-                self.controlsContainer.alpha = 1
-            }
-            controlsTimer?.invalidate()
-        } else {
-            controlsVisible = true
-            controlsContainer.isHidden = false
-            controlsContainer.alpha = 1
-            startControlsTimer()
-        }
+        nextEpisodeButton.isHidden = !(currentIndex + 1 < episodes.count)
+        episodePickerButton.isHidden = episodes.count <= 1
     }
 
     @objc private func closePlayer() {
         navigationController?.popViewController(animated: true)
     }
 
-    @objc private func skipBackward() { seek(by: -10) }
-    @objc private func skipForward()  { seek(by:  10) }
-    @objc private func skipIntro()    { seek(by:  90) }
-
-    private func seek(by seconds: Double) {
-        guard let player = currentPlayer else { return }
-        let current = CMTimeGetSeconds(player.currentTime())
-        guard current.isFinite else { return }
-        let target = max(0, current + seconds)
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
-    }
-
     @objc private func skipToNextEpisode() {
         playNextEpisodeIfAvailable()
+    }
+
+    func toggleControls() {
+        let hidden = controlsStack.isHidden
+        let alpha: CGFloat = hidden ? 1 : 0
+        UIView.animate(withDuration: 0.25) {
+            self.closeButton.alpha = alpha
+            self.controlsStack.alpha = alpha
+        } completion: { _ in
+            self.closeButton.isHidden = !self.closeButton.alpha.isZero
+            self.controlsStack.isHidden = !self.controlsStack.alpha.isZero
+        }
     }
 
     @objc private func showSpeedPicker() {
