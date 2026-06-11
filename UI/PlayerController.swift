@@ -601,7 +601,7 @@ class PlayerController: UIViewController {
             self?.currentPlayer?.rate = speed
         }
         if let sheet = picker.sheetPresentationController {
-            sheet.detents = [.medium()]
+            sheet.detents = [.height(320)]
             sheet.prefersGrabberVisible = true
         }
         present(picker, animated: true)
