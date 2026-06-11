@@ -1,6 +1,6 @@
 import UIKit
 
-class HomeViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UISearchBarDelegate, UISearchResultsUpdating {
+class HomeViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UICollectionViewDataSourcePrefetching, UISearchBarDelegate, UISearchResultsUpdating {
 
     var collectionView: UICollectionView!
     var movies: [Movie] = []
@@ -188,6 +188,7 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
         collectionView.backgroundColor = .clear
         collectionView.dataSource = self
         collectionView.delegate = self
+        collectionView.prefetchDataSource = self
         collectionView.alwaysBounceVertical = true
         collectionView.register(MovieCell.self, forCellWithReuseIdentifier: "MovieCell")
         collectionView.register(SectionHeaderView.self,
@@ -355,6 +356,12 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
         return cell
     }
     
+    // MARK: - UICollectionViewDataSourcePrefetching
+    func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+        let urls = indexPaths.compactMap { URL(string: movies[$0.row].thumbUrl) }
+        ImageLoader.shared.prefetch(urls)
+    }
+
     // MARK: - UICollectionViewDelegate
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         let movie = movies[indexPath.row]
@@ -371,19 +378,12 @@ class MovieCell: UICollectionViewCell {
     let epsLabel = UILabel()
     let epsBackground = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
     let gradientLayer = CAGradientLayer()
-    private var currentImageTask: URLSessionDataTask?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .secondarySystemBackground
         contentView.layer.cornerRadius = 14
         contentView.clipsToBounds = true
-        
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.25
-        layer.shadowRadius = 8
-        layer.shadowOffset = CGSize(width: 0, height: 4)
-        layer.masksToBounds = false
 
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
@@ -435,6 +435,8 @@ class MovieCell: UICollectionViewCell {
             epsLabel.trailingAnchor.constraint(equalTo: epsBackground.contentView.trailingAnchor, constant: -6),
             epsLabel.centerYAnchor.constraint(equalTo: epsBackground.contentView.centerYAnchor)
         ])
+
+        configureShadow()
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -446,11 +448,25 @@ class MovieCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        currentImageTask?.cancel()
         imageView.image = nil
         titleLabel.text = nil
         epsLabel.text = nil
         epsBackground.isHidden = true
+    }
+
+    private func configureShadow() {
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.2
+        layer.shadowRadius = 6
+        layer.shadowOffset = CGSize(width: 0, height: 3)
+        layer.masksToBounds = false
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: contentView.layer.cornerRadius).cgPath
+    }
+
+    override var bounds: CGRect {
+        didSet {
+            layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: contentView.layer.cornerRadius).cgPath
+        }
     }
 
     func configure(with movie: Movie) {
@@ -463,7 +479,7 @@ class MovieCell: UICollectionViewCell {
             epsLabel.text = trimmed
         }
         if let url = URL(string: movie.thumbUrl) {
-            currentImageTask = ImageLoader.shared.load(url, into: imageView)
+            ImageLoader.shared.load(url, into: imageView)
         }
     }
 }

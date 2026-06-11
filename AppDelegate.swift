@@ -34,16 +34,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         let tabBar = UITabBarController()
         tabBar.viewControllers = [homeNav, historyNav, favsNav]
-        if #available(iOS 13.0, *) {
-            let tabAppearance = UITabBarAppearance()
-            tabAppearance.configureWithOpaqueBackground()
-            tabAppearance.backgroundColor = .systemBackground
-            tabBar.tabBar.standardAppearance = tabAppearance
-            // scrollEdgeAppearance trên UITabBar chỉ có từ iOS 15+
-            if #available(iOS 15.0, *) {
-                tabBar.tabBar.scrollEdgeAppearance = tabAppearance
-            }
-        }
+
+        let tabAppearance = UITabBarAppearance()
+        tabAppearance.configureWithOpaqueBackground()
+        tabAppearance.backgroundColor = .systemBackground
+        tabAppearance.stackedLayoutAppearance.normal.iconColor = .secondaryLabel
+        tabAppearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor.secondaryLabel]
+        tabAppearance.stackedLayoutAppearance.selected.iconColor = .systemRed
+        tabAppearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor.systemRed]
+        tabBar.tabBar.standardAppearance = tabAppearance
+        tabBar.tabBar.scrollEdgeAppearance = tabAppearance
 
         window.rootViewController = tabBar
         self.window = window
@@ -58,13 +58,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         nav.tabBarItem = UITabBarItem(title: tabTitle,
                                       image: UIImage(systemName: icon),
                                       tag: 0)
-        if #available(iOS 13.0, *) {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = .systemBackground
-            nav.navigationBar.standardAppearance = appearance
-            nav.navigationBar.scrollEdgeAppearance = appearance
-        }
+
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = .systemBackground
+        appearance.titleTextAttributes = [.font: UIFont.systemFont(ofSize: 17, weight: .bold)]
+        nav.navigationBar.standardAppearance = appearance
+        nav.navigationBar.scrollEdgeAppearance = appearance
+        nav.navigationBar.tintColor = .systemRed
+
         return nav
     }
 }

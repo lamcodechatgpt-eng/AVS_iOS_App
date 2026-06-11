@@ -24,10 +24,11 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
         let sideInset: CGFloat = 12
         let totalSpacing = sideInset * 2 + interItem * (columns - 1)
         let cellWidth = (view.bounds.width - totalSpacing) / columns
-        layout.itemSize = CGSize(width: cellWidth, height: 48)
-        layout.minimumLineSpacing = interItem
+        layout.itemSize = CGSize(width: cellWidth, height: 50)
+        layout.minimumLineSpacing = 10
         layout.minimumInteritemSpacing = interItem
         layout.sectionInset = UIEdgeInsets(top: 16, left: sideInset, bottom: 16, right: sideInset)
+        layout.headerReferenceSize = CGSize(width: view.bounds.width, height: 40)
 
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -36,8 +37,12 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
         collectionView.delegate = self
         collectionView.alwaysBounceVertical = true
         collectionView.register(EpisodeCell.self, forCellWithReuseIdentifier: "EpisodeCell")
+        collectionView.register(SectionHeaderView.self,
+                                forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
+                                withReuseIdentifier: "Header")
 
         let refresh = UIRefreshControl()
+        refresh.tintColor = .label
         refresh.addTarget(self, action: #selector(refresh(_:)), for: .valueChanged)
         collectionView.refreshControl = refresh
 
@@ -78,8 +83,16 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
 
     func collectionView(_ cv: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = cv.dequeueReusableCell(withReuseIdentifier: "EpisodeCell", for: indexPath) as! EpisodeCell
-        cell.configure(with: episodes[indexPath.row], number: indexPath.row + 1)
+        let ep = episodes[indexPath.row]
+        let hasPosition = PlaybackStore.shared.position(for: ep.link) != nil
+        cell.configure(with: ep, number: indexPath.row + 1, watched: hasPosition)
         return cell
+    }
+
+    func collectionView(_ cv: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
+        let h = cv.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "Header", for: indexPath) as! SectionHeaderView
+        h.titleLabel.text = "📺 Danh sách tập (\(episodes.count) tập)"
+        return h
     }
 
     // MARK: - UICollectionViewDelegate
@@ -95,14 +108,12 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
 // MARK: - Episode Cell
 class EpisodeCell: UICollectionViewCell {
     private let label = UILabel()
+    private var isWatched = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = .secondarySystemBackground
-        contentView.layer.cornerRadius = 8
+        contentView.layer.cornerRadius = 10
         contentView.clipsToBounds = true
-        contentView.layer.borderWidth = 1
-        contentView.layer.borderColor = UIColor.separator.cgColor
 
         label.font = .systemFont(ofSize: 14, weight: .semibold)
         label.textColor = .label
@@ -122,8 +133,20 @@ class EpisodeCell: UICollectionViewCell {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(with episode: Episode, number: Int) {
-        // Trích số tập nếu có; nếu không thì show số thứ tự
+    func configure(with episode: Episode, number: Int, watched: Bool = false) {
+        isWatched = watched
+        if watched {
+            contentView.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.1)
+            contentView.layer.borderWidth = 1
+            contentView.layer.borderColor = UIColor.systemGreen.withAlphaComponent(0.3).cgColor
+            label.textColor = .systemGreen
+        } else {
+            contentView.backgroundColor = .secondarySystemBackground
+            contentView.layer.borderWidth = 1
+            contentView.layer.borderColor = UIColor.separator.cgColor
+            label.textColor = .label
+        }
+
         let raw = episode.title.lowercased()
         if let _ = raw.range(of: #"tập\s*\d+"#, options: .regularExpression),
            let m = raw.range(of: #"\d+"#, options: .regularExpression) {
@@ -139,7 +162,8 @@ class EpisodeCell: UICollectionViewCell {
     override var isHighlighted: Bool {
         didSet {
             UIView.animate(withDuration: 0.15) {
-                self.contentView.backgroundColor = self.isHighlighted ? .systemFill : .secondarySystemBackground
+                let base = self.isWatched ? UIColor.systemGreen.withAlphaComponent(0.1) : UIColor.secondarySystemBackground
+                self.contentView.backgroundColor = self.isHighlighted ? UIColor.systemFill : base
             }
         }
     }

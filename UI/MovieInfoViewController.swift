@@ -68,38 +68,40 @@ class MovieInfoViewController: UIViewController {
         view.addSubview(scrollView)
 
         stack.axis = .vertical
-        stack.spacing = 14
+        stack.spacing = 16
         stack.alignment = .fill
         stack.translatesAutoresizingMaskIntoConstraints = false
         scrollView.addSubview(stack)
 
+        let bannerHeightConstraint: NSLayoutConstraint
         bannerImage.contentMode = .scaleAspectFill
         bannerImage.clipsToBounds = true
         bannerImage.backgroundColor = .tertiarySystemFill
-        bannerImage.layer.cornerRadius = 12
         bannerImage.translatesAutoresizingMaskIntoConstraints = false
         let bannerWrap = UIView()
+        bannerWrap.clipsToBounds = true
         bannerWrap.addSubview(bannerImage)
+        bannerHeightConstraint = bannerImage.heightAnchor.constraint(equalTo: bannerImage.widthAnchor, multiplier: 9.0/16.0)
         NSLayoutConstraint.activate([
             bannerImage.topAnchor.constraint(equalTo: bannerWrap.topAnchor),
             bannerImage.leadingAnchor.constraint(equalTo: bannerWrap.leadingAnchor),
             bannerImage.trailingAnchor.constraint(equalTo: bannerWrap.trailingAnchor),
             bannerImage.bottomAnchor.constraint(equalTo: bannerWrap.bottomAnchor),
-            bannerImage.heightAnchor.constraint(equalTo: bannerImage.widthAnchor, multiplier: 9.0/16.0)
+            bannerHeightConstraint
         ])
 
-        titleLabel.font = .systemFont(ofSize: 22, weight: .bold)
+        titleLabel.font = .systemFont(ofSize: 24, weight: .bold)
         titleLabel.numberOfLines = 0
         metaLabel.font = .systemFont(ofSize: 13)
         metaLabel.textColor = .secondaryLabel
         metaLabel.numberOfLines = 1
 
-        descLabel.font = .systemFont(ofSize: 14)
+        descLabel.font = .systemFont(ofSize: 15)
         descLabel.textColor = .label
         descLabel.numberOfLines = 0
 
         genreStack.axis = .horizontal
-        genreStack.spacing = 6
+        genreStack.spacing = 8
         genreStack.distribution = .fillProportionally
         let genreScroll = UIScrollView()
         genreScroll.showsHorizontalScrollIndicator = false
@@ -125,7 +127,7 @@ class MovieInfoViewController: UIViewController {
 
         let buttonsRow = UIStackView(arrangedSubviews: [continueButton, watchButton])
         buttonsRow.axis = .horizontal
-        buttonsRow.spacing = 10
+        buttonsRow.spacing = 12
         buttonsRow.distribution = .fillEqually
 
         loader.startAnimating()
@@ -147,7 +149,7 @@ class MovieInfoViewController: UIViewController {
             stack.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor, constant: -16),
             stack.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: -24),
             stack.widthAnchor.constraint(equalTo: scrollView.widthAnchor, constant: -32),
-            genreScroll.heightAnchor.constraint(equalToConstant: 32)
+            genreScroll.heightAnchor.constraint(equalToConstant: 34)
         ])
     }
 
@@ -155,8 +157,9 @@ class MovieInfoViewController: UIViewController {
         btn.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
         btn.backgroundColor = accent ? .systemRed : .secondarySystemFill
         btn.setTitleColor(accent ? .white : .label, for: .normal)
-        btn.layer.cornerRadius = 10
-        btn.contentEdgeInsets = UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        btn.layer.cornerRadius = 12
+        btn.clipsToBounds = true
+        btn.contentEdgeInsets = UIEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
     }
 
     private func bindMovie() {
@@ -198,10 +201,10 @@ class MovieInfoViewController: UIViewController {
         for g in d.genres.prefix(8) {
             let chip = UILabel()
             chip.text = "  \(g)  "
-            chip.font = .systemFont(ofSize: 12, weight: .medium)
-            chip.textColor = .label
-            chip.backgroundColor = .tertiarySystemFill
-            chip.layer.cornerRadius = 10
+            chip.font = .systemFont(ofSize: 12, weight: .semibold)
+            chip.textColor = .systemRed
+            chip.backgroundColor = UIColor.systemRed.withAlphaComponent(0.1)
+            chip.layer.cornerRadius = 12
             chip.clipsToBounds = true
             genreStack.addArrangedSubview(chip)
         }
