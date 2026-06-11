@@ -40,8 +40,6 @@ class PlayerController: UIViewController {
     private var m3u8Loader: M3U8ResourceLoader?
     private weak var currentPlayerItem: AVPlayerItem?
 
-    private var overlayGradientLayer: CAGradientLayer?
-
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
@@ -49,11 +47,6 @@ class PlayerController: UIViewController {
         setupLoadingUI()
         setupOverlayControls()
         startResolve()
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        overlayGradientLayer?.frame = controlsContainer.bounds
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -460,18 +453,6 @@ class PlayerController: UIViewController {
         controlsContainer.translatesAutoresizingMaskIntoConstraints = false
         controlsContainer.isHidden = true
         view.addSubview(controlsContainer)
-
-        let gradient = CAGradientLayer()
-        gradient.colors = [
-            UIColor.black.withAlphaComponent(0.4).cgColor,
-            UIColor.clear.cgColor,
-            UIColor.clear.cgColor,
-            UIColor.black.withAlphaComponent(0.3).cgColor
-        ]
-        gradient.locations = [0.0, 0.2, 0.7, 1.0]
-        gradient.frame = controlsContainer.bounds
-        controlsContainer.layer.addSublayer(gradient)
-        overlayGradientLayer = gradient
 
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(toggleControls))
         controlsContainer.addGestureRecognizer(tapGesture)
