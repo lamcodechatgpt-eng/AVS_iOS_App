@@ -21,8 +21,19 @@ class GenreSelectionViewController: UIViewController, UICollectionViewDataSource
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Chọn Thể Loại"
-        view.backgroundColor = .systemBackground
-        
+
+        let bgView = BackgroundView()
+        bgView.setStyle(.accent)
+        bgView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bgView)
+        view.sendSubviewToBack(bgView)
+        NSLayoutConstraint.activate([
+            bgView.topAnchor.constraint(equalTo: view.topAnchor),
+            bgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bgView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+
         let applyBtn = UIBarButtonItem(title: "Áp Dụng", style: .done, target: self, action: #selector(applyTapped))
         navigationItem.rightBarButtonItem = applyBtn
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Hủy", style: .plain, target: self, action: #selector(cancelTapped))
@@ -80,10 +91,10 @@ class GenreCell: UICollectionViewCell {
     
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = .secondarySystemFill
+        contentView.backgroundColor = UIColor.systemRed.withAlphaComponent(0.06)
         contentView.layer.cornerRadius = 20
-        contentView.layer.borderWidth = 1.5
-        contentView.layer.borderColor = UIColor.clear.cgColor
+        contentView.layer.borderWidth = 1.2
+        contentView.layer.borderColor = UIColor.separator.cgColor
         contentView.clipsToBounds = true
         
         titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
@@ -106,13 +117,13 @@ class GenreCell: UICollectionViewCell {
         didSet {
             UIView.animate(withDuration: 0.2) {
                 if self.isSelected {
-                    self.contentView.backgroundColor = .systemRed.withAlphaComponent(0.15)
+                    self.contentView.backgroundColor = UIColor.systemRed.withAlphaComponent(0.15)
                     self.contentView.layer.borderColor = UIColor.systemRed.cgColor
                     self.titleLabel.textColor = .systemRed
                     self.titleLabel.font = .systemFont(ofSize: 14, weight: .bold)
                 } else {
-                    self.contentView.backgroundColor = .secondarySystemFill
-                    self.contentView.layer.borderColor = UIColor.clear.cgColor
+                    self.contentView.backgroundColor = UIColor.systemRed.withAlphaComponent(0.06)
+                    self.contentView.layer.borderColor = UIColor.separator.cgColor
                     self.titleLabel.textColor = .label
                     self.titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
                 }

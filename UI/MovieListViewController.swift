@@ -29,10 +29,12 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
     private var historySubtitles: [Int: String] = [:]
     private let emptyLabel = UILabel()
 
+    private let bgView = BackgroundView()
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = source.title
-        view.backgroundColor = .systemBackground
+        setupBackground()
         setupCollection()
         setupEmptyLabel()
         if source == .history {
@@ -48,6 +50,19 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         reload()
+    }
+
+    private func setupBackground() {
+        bgView.setStyle(.accent)
+        bgView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bgView)
+        view.sendSubviewToBack(bgView)
+        NSLayoutConstraint.activate([
+            bgView.topAnchor.constraint(equalTo: view.topAnchor),
+            bgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bgView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
     }
 
     private func setupCollection() {

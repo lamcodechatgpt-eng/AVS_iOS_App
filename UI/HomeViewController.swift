@@ -15,17 +15,32 @@ class HomeViewController: UIViewController, UICollectionViewDataSource, UICollec
     private let suggestionsVC = SearchSuggestionsViewController()
     private var suggestSearchWork: DispatchWorkItem?
     
+    private let bgView = BackgroundView()
+
     override func viewDidLoad() {
         super.viewDidLoad()
         self.title = "AnimeVietsub"
-        self.view.backgroundColor = .systemBackground
 
+        setupBackground()
         setupNavigationBarButtons()
         setupSearchBar()
         setupCollectionView()
         setupLoadingIndicator()
 
         fetchData()
+    }
+
+    private func setupBackground() {
+        bgView.setStyle(.accent)
+        bgView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bgView)
+        view.sendSubviewToBack(bgView)
+        NSLayoutConstraint.activate([
+            bgView.topAnchor.constraint(equalTo: view.topAnchor),
+            bgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bgView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
     }
 
     private func setupNavigationBarButtons() {
@@ -381,7 +396,7 @@ class MovieCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = .secondarySystemBackground
+        contentView.backgroundColor = .tertiarySystemFill
         contentView.layer.cornerRadius = 14
         contentView.clipsToBounds = true
 

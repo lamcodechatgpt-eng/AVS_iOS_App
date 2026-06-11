@@ -7,14 +7,29 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
     var collectionView: UICollectionView!
     private let loader = UIActivityIndicatorView(style: .large)
 
+    private let bgView = BackgroundView()
+
     override func viewDidLoad() {
         super.viewDidLoad()
         self.title = movie?.title
-        self.view.backgroundColor = .systemBackground
 
+        setupBackground()
         setupCollectionView()
         setupLoader()
         fetchEpisodes()
+    }
+
+    private func setupBackground() {
+        bgView.setStyle(.accent)
+        bgView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bgView)
+        view.sendSubviewToBack(bgView)
+        NSLayoutConstraint.activate([
+            bgView.topAnchor.constraint(equalTo: view.topAnchor),
+            bgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bgView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
     }
 
     private func setupCollectionView() {

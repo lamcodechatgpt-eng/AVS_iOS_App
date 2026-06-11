@@ -36,12 +36,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         tabBar.viewControllers = [homeNav, historyNav, favsNav]
 
         let tabAppearance = UITabBarAppearance()
-        tabAppearance.configureWithOpaqueBackground()
-        tabAppearance.backgroundColor = .systemBackground
+        tabAppearance.configureWithDefaultBackground()
+        tabAppearance.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.92)
+        tabAppearance.backgroundEffect = UIBlurEffect(style: .systemChromeMaterial)
         tabAppearance.stackedLayoutAppearance.normal.iconColor = .secondaryLabel
         tabAppearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor.secondaryLabel]
         tabAppearance.stackedLayoutAppearance.selected.iconColor = .systemRed
-        tabAppearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor.systemRed]
+        tabAppearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor.systemRed, .font: UIFont.systemFont(ofSize: 11, weight: .semibold)]
         tabBar.tabBar.standardAppearance = tabAppearance
         tabBar.tabBar.scrollEdgeAppearance = tabAppearance
 
@@ -60,8 +61,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                                       tag: 0)
 
         let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = .systemBackground
+        appearance.configureWithTransparentBackground()
+        appearance.backgroundColor = .clear
         appearance.titleTextAttributes = [.font: UIFont.systemFont(ofSize: 17, weight: .bold)]
         nav.navigationBar.standardAppearance = appearance
         nav.navigationBar.scrollEdgeAppearance = appearance

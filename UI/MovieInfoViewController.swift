@@ -20,11 +20,13 @@ class MovieInfoViewController: UIViewController {
     private var details: MovieDetails?
     private var resumeEpisodeIndex: Int?
 
+    private let bgView = BackgroundView()
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
         title = movie.title
 
+        setupBackground()
         setupNavBar()
         setupViews()
         bindMovie()
@@ -61,6 +63,19 @@ class MovieInfoViewController: UIViewController {
     @objc private func toggleFavorite() {
         _ = PlaybackStore.shared.toggleFavorite(movie)
         refreshFavButton()
+    }
+
+    private func setupBackground() {
+        bgView.setStyle(.default)
+        bgView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bgView)
+        view.sendSubviewToBack(bgView)
+        NSLayoutConstraint.activate([
+            bgView.topAnchor.constraint(equalTo: view.topAnchor),
+            bgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bgView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
     }
 
     private func setupViews() {
