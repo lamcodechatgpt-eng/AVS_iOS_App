@@ -44,5 +44,16 @@ final class ImageLoader {
         return task
     }
 
+    func prefetch(_ urls: [URL]) {
+        for url in urls {
+            let key = url.absoluteString as NSString
+            if memory.object(forKey: key) != nil { continue }
+            session.dataTask(with: url) { [weak self] data, _, _ in
+                guard let data = data, let img = UIImage(data: data) else { return }
+                self?.memory.setObject(img, forKey: key)
+            }.resume()
+        }
+    }
+
     func purge() { memory.removeAllObjects() }
 }
