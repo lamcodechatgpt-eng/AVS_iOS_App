@@ -601,7 +601,11 @@ class PlayerController: UIViewController {
             self?.currentPlayer?.rate = speed
         }
         if let sheet = picker.sheetPresentationController {
-            sheet.detents = [.height(320)]
+            if #available(iOS 16.0, *) {
+                sheet.detents = [.height(320)]
+            } else {
+                sheet.detents = [.medium()]
+            }
             sheet.prefersGrabberVisible = true
         }
         present(picker, animated: true)
@@ -632,7 +636,11 @@ class PlayerController: UIViewController {
             self.retry()
         }
         if let sheet = pickerVC.sheetPresentationController {
-            sheet.detents = [.height(360), .large()]
+            if #available(iOS 16.0, *) {
+                sheet.detents = [.height(360), .large()]
+            } else {
+                sheet.detents = [.medium(), .large()]
+            }
             sheet.prefersGrabberVisible = true
             sheet.prefersEdgeAttachedInCompactHeight = true
         }
