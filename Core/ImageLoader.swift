@@ -27,7 +27,7 @@ final class ImageLoader {
     }
 
     private func diskCachePath(for key: String) -> URL {
-        let hash = "\(key.hashValue)".data(using: .utf8)?.base64EncodedString() ?? key
+        let hash = abs(key.hashValue).description
         return diskCacheURL.appendingPathComponent(hash)
     }
 
@@ -43,11 +43,10 @@ final class ImageLoader {
 
         let diskPath = diskCachePath(for: url.absoluteString)
         if let data = try? Data(contentsOf: diskPath), let img = UIImage(data: data) {
-            let decoded = img.decodedImage()
-            self.memory.setObject(decoded, forKey: key, cost: Int(decoded.scale * decoded.size.width * decoded.size.height))
+            memory.setObject(img, forKey: key, cost: Int(img.size.width * img.size.height))
             DispatchQueue.main.async {
                 guard let iv = imageView, iv.tag == key.hashValue else { return }
-                iv.image = decoded
+                iv.image = img
             }
             return nil
         }
@@ -55,13 +54,12 @@ final class ImageLoader {
         let task = session.dataTask(with: url) { [weak self, weak imageView] data, _, err in
             guard let self = self, let data = data, err == nil else { return }
             guard let img = UIImage(data: data) else { return }
-            let decoded = img.decodedImage()
-            self.memory.setObject(decoded, forKey: key, cost: Int(decoded.scale * decoded.size.width * decoded.size.height))
+            self.memory.setObject(img, forKey: key, cost: Int(img.size.width * img.size.height))
             try? data.write(to: diskPath)
             DispatchQueue.main.async {
                 guard let iv = imageView, iv.tag == key.hashValue else { return }
                 UIView.transition(with: iv, duration: 0.2, options: .transitionCrossDissolve, animations: {
-                    iv.image = decoded
+                    iv.image = img
                 })
             }
         }
@@ -75,17 +73,14 @@ final class ImageLoader {
             if memory.object(forKey: key) != nil { continue }
             let diskPath = diskCachePath(for: url.absoluteString)
             if let data = try? Data(contentsOf: diskPath), let img = UIImage(data: data) {
-                let decoded = img.decodedImage()
-                memory.setObject(decoded, forKey: key, cost: Int(decoded.scale * decoded.size.width * decoded.size.height))
+                memory.setObject(img, forKey: key, cost: Int(img.size.width * img.size.height))
                 continue
             }
-            let task = session.dataTask(with: url) { [weak self] data, _, _ in
+            session.dataTask(with: url) { [weak self] data, _, _ in
                 guard let self = self, let data = data, let img = UIImage(data: data) else { return }
-                let decoded = img.decodedImage()
-                self.memory.setObject(decoded, forKey: key, cost: Int(decoded.scale * decoded.size.width * decoded.size.height))
+                self.memory.setObject(img, forKey: key, cost: Int(img.size.width * img.size.height))
                 try? data.write(to: self.diskCachePath(for: url.absoluteString))
-            }
-            task.resume()
+            }.resume()
         }
     }
 
@@ -93,21 +88,5 @@ final class ImageLoader {
         memory.removeAllObjects()
         try? fileManager.removeItem(at: diskCacheURL)
         try? fileManager.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
-    }
-}
-
-extension UIImage {
-    func decodedImage() -> UIImage {
-        guard let image = cgImage else { return self }
-        let size = CGSize(width: image.width, height: image.height)
-        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.first.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
-        guard let context = CGContext(data: nil, width: image.width, height: image.height,
-                                      bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: CGColorSpaceCreateDeviceRGB(),
-                                      bitmapInfo: bitmapInfo.rawValue) else { return self }
-        let rect = CGRect(origin: .zero, size: size)
-        context.draw(image, in: rect)
-        guard let decoded = context.makeImage() else { return self }
-        return UIImage(cgImage: decoded, scale: scale, orientation: imageOrientation)
     }
 }
