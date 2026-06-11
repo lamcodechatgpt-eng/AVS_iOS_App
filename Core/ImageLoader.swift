@@ -1,5 +1,9 @@
 import UIKit
 
+/// NSCache-backed lazy image loader.
+/// - Memory cache: NSCache (auto-evicted on memory pressure)
+/// - Disk cache: URLCache.shared (default 50MB which iOS sets)
+/// Cancellable per-cell so reused cells don't paint stale images.
 final class ImageLoader {
     static let shared = ImageLoader()
 
@@ -38,17 +42,6 @@ final class ImageLoader {
         }
         task.resume()
         return task
-    }
-
-    func prefetch(_ urls: [URL]) {
-        for url in urls {
-            let key = url.absoluteString as NSString
-            if memory.object(forKey: key) != nil { continue }
-            session.dataTask(with: url) { [weak self] data, _, _ in
-                guard let data = data, let img = UIImage(data: data) else { return }
-                self?.memory.setObject(img, forKey: key)
-            }.resume()
-        }
     }
 
     func purge() { memory.removeAllObjects() }

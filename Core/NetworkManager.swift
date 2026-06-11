@@ -317,19 +317,24 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 var req = URLRequest(url: targetUrl)
                 req.setValue(self.resolvedDomain + "/", forHTTPHeaderField: "Referer")
                 self.webView.load(req)
+                // Trang xem phim cần ~40s vì còn phải chờ JS auto-click → AJAX trả luồng.
+                // Trang chủ/tìm kiếm/thông tin chỉ cần render HTML tĩnh nên 15s là đủ;
+                // hết thì rơi xuống fallback (bit.ly) ngay thay vì để user chờ mãi.
                 let path = targetUrl.path
                 let isWatchLike = waitForIframe
                     || path.contains("xem-phim")
                     || path.contains("-tap-")
                     || path.contains("/tap-")
-                // Giảm số lần retry + poll nhanh hơn (500ms) để load nhanh
+                // Iframe player: 20s đủ để JWPlayer khởi động + bắt m3u8. Lâu hơn cũng vô ích —
+                // nếu chưa fetch luồng trong 20s thì khả năng cao là CF Turnstile chặn hoặc
+                // player không khởi động. Watch page AVS chỉ cần 15s để PLAYER_DATA hiện ra.
                 let retries: Int
                 if waitForIframe {
-                    retries = 16
+                    retries = 20
                 } else if isWatchLike {
-                    retries = 10
+                    retries = 15
                 } else {
-                    retries = 6
+                    retries = 10
                 }
                 self.checkDOM(webView: self.webView, loadId: loadId, retries: retries, waitForIframe: waitForIframe)
             }
