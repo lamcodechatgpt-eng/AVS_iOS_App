@@ -41,6 +41,11 @@ class PlayerController: UIViewController {
         startResolve()
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        gradientLayer?.frame = view.bounds
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         // Lưu vị trí cuối cùng. KHÔNG pause vì PiP cần tiếp tục chạy.
@@ -65,6 +70,7 @@ class PlayerController: UIViewController {
         if let o = endObserver { NotificationCenter.default.removeObserver(o) }
     }
 
+    private var gradientLayer: CAGradientLayer?
     private var resolveStartTime: Date?
     private var phaseTimer: Timer?
 
@@ -352,15 +358,16 @@ class PlayerController: UIViewController {
     }
 
     private func setupLoadingUI() {
-        let gradientLayer = CAGradientLayer()
-        gradientLayer.colors = [
+        let gLayer = CAGradientLayer()
+        gLayer.colors = [
             UIColor(red: 0.08, green: 0.04, blue: 0.12, alpha: 1).cgColor,
             UIColor(red: 0.15, green: 0.08, blue: 0.2, alpha: 1).cgColor,
             UIColor.black.cgColor
         ]
-        gradientLayer.locations = [0.0, 0.5, 1.0]
-        gradientLayer.frame = view.bounds
-        view.layer.insertSublayer(gradientLayer, at: 0)
+        gLayer.locations = [0.0, 0.5, 1.0]
+        gLayer.frame = view.bounds
+        view.layer.insertSublayer(gLayer, at: 0)
+        gradientLayer = gLayer
 
         episodeNumberLabel.textColor = .white
         episodeNumberLabel.font = .systemFont(ofSize: 28, weight: .bold)
