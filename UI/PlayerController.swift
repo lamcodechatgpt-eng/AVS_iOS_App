@@ -11,6 +11,8 @@ class PlayerController: UIViewController {
     private var resumeStatusObservation: NSKeyValueObservation?
 
     private let activityIndicator = UIActivityIndicatorView(style: .large)
+    private let episodeNumberLabel = UILabel()
+    private let episodeTitleLabel = UILabel()
     private let statusLabel = UILabel()
     private let logTextView = UITextView()
     private let copyButton = UIButton(type: .system)
@@ -35,6 +37,7 @@ class PlayerController: UIViewController {
 
         setupLoadingUI()
         setupNavBarItems()
+        updateEpisodeInfo()
         startResolve()
     }
 
@@ -65,7 +68,15 @@ class PlayerController: UIViewController {
     private var resolveStartTime: Date?
     private var phaseTimer: Timer?
 
+    private func updateEpisodeInfo() {
+        guard currentIndex < episodes.count else { return }
+        episodeNumberLabel.text = "Tập \(currentIndex + 1)"
+        episodeTitleLabel.text = episodes[currentIndex].title
+        navigationItem.title = episodes[currentIndex].title
+    }
+
     private func startResolve() {
+        updateEpisodeInfo()
         activityIndicator.startAnimating()
         statusLabel.text = "Đang tải trang xem phim..."
         statusLabel.isHidden = false
@@ -341,13 +352,36 @@ class PlayerController: UIViewController {
     }
 
     private func setupLoadingUI() {
+        let gradientLayer = CAGradientLayer()
+        gradientLayer.colors = [
+            UIColor(red: 0.08, green: 0.04, blue: 0.12, alpha: 1).cgColor,
+            UIColor(red: 0.15, green: 0.08, blue: 0.2, alpha: 1).cgColor,
+            UIColor.black.cgColor
+        ]
+        gradientLayer.locations = [0.0, 0.5, 1.0]
+        gradientLayer.frame = view.bounds
+        view.layer.insertSublayer(gradientLayer, at: 0)
+
+        episodeNumberLabel.textColor = .white
+        episodeNumberLabel.font = .systemFont(ofSize: 28, weight: .bold)
+        episodeNumberLabel.textAlignment = .center
+        episodeNumberLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(episodeNumberLabel)
+
+        episodeTitleLabel.textColor = UIColor.white.withAlphaComponent(0.7)
+        episodeTitleLabel.font = .systemFont(ofSize: 17, weight: .regular)
+        episodeTitleLabel.textAlignment = .center
+        episodeTitleLabel.numberOfLines = 2
+        episodeTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(episodeTitleLabel)
+
         activityIndicator.color = .white
         activityIndicator.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(activityIndicator)
 
         statusLabel.text = "Đang tải..."
-        statusLabel.textColor = .white
-        statusLabel.font = .systemFont(ofSize: 15, weight: .medium)
+        statusLabel.textColor = UIColor.white.withAlphaComponent(0.5)
+        statusLabel.font = .systemFont(ofSize: 13, weight: .regular)
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -383,10 +417,18 @@ class PlayerController: UIViewController {
         view.addSubview(retryButton)
 
         NSLayoutConstraint.activate([
-            activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            activityIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -40),
+            episodeNumberLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            episodeNumberLabel.bottomAnchor.constraint(equalTo: view.centerYAnchor, constant: -40),
 
-            statusLabel.topAnchor.constraint(equalTo: activityIndicator.bottomAnchor, constant: 16),
+            episodeTitleLabel.topAnchor.constraint(equalTo: episodeNumberLabel.bottomAnchor, constant: 6),
+            episodeTitleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            episodeTitleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            episodeTitleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+
+            activityIndicator.topAnchor.constraint(equalTo: episodeTitleLabel.bottomAnchor, constant: 28),
+            activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+
+            statusLabel.topAnchor.constraint(equalTo: activityIndicator.bottomAnchor, constant: 14),
             statusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
             statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
@@ -498,6 +540,7 @@ class PlayerController: UIViewController {
 
         currentIndex = next
         episodeUrl = episodes[next].link
+        updateEpisodeInfo()
         updateNavBarItems()
         retry()
     }
@@ -519,6 +562,7 @@ class PlayerController: UIViewController {
             self.currentIndex = idx
             self.episodeUrl = self.episodes[idx].link
             self.dismiss(animated: true)
+            self.updateEpisodeInfo()
             self.updateNavBarItems()
             self.retry()
         }
