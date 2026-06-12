@@ -16,12 +16,6 @@ class PlayerController: UIViewController {
     private let copyButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
 
-    // Overlay buttons — KHÔNG intercept touch, AVPlayer native controls vẫn hoạt động
-    private let episodePickerButton = UIButton(type: .system)
-    private let nextEpisodeButton = UIButton(type: .system)
-    private let speedButton = UIButton(type: .system)
-    private let closeButton = UIButton(type: .system)
-    private let controlsStack = UIStackView()
     private weak var currentPlayer: AVPlayer?
     private weak var currentPlayerVC: AVPlayerViewController?
 
@@ -40,7 +34,7 @@ class PlayerController: UIViewController {
         view.backgroundColor = .black
 
         setupLoadingUI()
-        setupOverlayControls()
+        setupNavBarItems()
         startResolve()
     }
 
@@ -282,8 +276,7 @@ class PlayerController: UIViewController {
         copyButton.isHidden = true
         retryButton.isHidden = true
 
-        view.bringSubviewToFront(closeButton)
-        view.bringSubviewToFront(controlsStack)
+        updateNavBarItems()
 
         // Seek-to-resume khi user quay lại tập đang xem dở.
         // Quan sát readyToPlay rồi seek (không seek trước khi item ready).
@@ -442,72 +435,36 @@ class PlayerController: UIViewController {
         startResolve()
     }
 
-    // MARK: - Overlay controls (non‑intrusive, không intercept touch)
+    // MARK: - Nav bar items (không overlay, không che video)
 
-    private func setupOverlayControls() {
-        configureIconButton(episodePickerButton, icon: "list.bullet.rectangle", action: #selector(showEpisodePicker))
-        configureIconButton(nextEpisodeButton, icon: "forward.fill", action: #selector(skipToNextEpisode))
-        configureIconButton(speedButton, icon: "speedometer", action: #selector(showSpeedPicker))
-        configureIconButton(closeButton, icon: "xmark", action: #selector(closePlayer))
-
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(closeButton)
-
-        controlsStack.axis = .horizontal
-        controlsStack.spacing = 12
-        controlsStack.translatesAutoresizingMaskIntoConstraints = false
-        controlsStack.addArrangedSubview(speedButton)
-        controlsStack.addArrangedSubview(episodePickerButton)
-        controlsStack.addArrangedSubview(nextEpisodeButton)
-        view.addSubview(controlsStack)
-
-        NSLayoutConstraint.activate([
-            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            closeButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-
-            controlsStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            controlsStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
-        ])
-
-        // AVPlayer native controls handle play/pause/seek —
-        // KHÔNG overlay container, KHÔNG intercept touch, KHÔNG auto‑hide.
-        updateButtonVisibility()
+    private func setupNavBarItems() {
+        updateNavBarItems()
     }
 
-    private func configureIconButton(_ btn: UIButton, icon: String, action: Selector) {
-        let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
-        btn.setImage(UIImage(systemName: icon, withConfiguration: config), for: .normal)
-        btn.tintColor = .white
-        btn.backgroundColor = UIColor.black.withAlphaComponent(0.4)
-        btn.layer.cornerRadius = 18
-        btn.addTarget(self, action: action, for: .touchUpInside)
-        btn.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        btn.heightAnchor.constraint(equalToConstant: 36).isActive = true
-    }
+    private func updateNavBarItems() {
+        var items: [UIBarButtonItem] = []
 
-    private func updateButtonVisibility() {
-        nextEpisodeButton.isHidden = !(currentIndex + 1 < episodes.count)
-        episodePickerButton.isHidden = episodes.count <= 1
-    }
+        if episodes.count > 1 {
+            let epItem = UIBarButtonItem(image: UIImage(systemName: "list.bullet.rectangle"), style: .plain, target: self, action: #selector(showEpisodePicker))
+            epItem.tintColor = .white
+            items.append(epItem)
+        }
 
-    @objc private func closePlayer() {
-        navigationController?.popViewController(animated: true)
+        let speedItem = UIBarButtonItem(image: UIImage(systemName: "speedometer"), style: .plain, target: self, action: #selector(showSpeedPicker))
+        speedItem.tintColor = .white
+        items.append(speedItem)
+
+        if currentIndex + 1 < episodes.count {
+            let nextItem = UIBarButtonItem(image: UIImage(systemName: "forward.fill"), style: .plain, target: self, action: #selector(skipToNextEpisode))
+            nextItem.tintColor = .white
+            items.append(nextItem)
+        }
+
+        navigationItem.rightBarButtonItems = items
     }
 
     @objc private func skipToNextEpisode() {
         playNextEpisodeIfAvailable()
-    }
-
-    func toggleControls() {
-        let hidden = controlsStack.isHidden
-        let alpha: CGFloat = hidden ? 1 : 0
-        UIView.animate(withDuration: 0.25) {
-            self.closeButton.alpha = alpha
-            self.controlsStack.alpha = alpha
-        } completion: { _ in
-            self.closeButton.isHidden = !self.closeButton.alpha.isZero
-            self.controlsStack.isHidden = !self.controlsStack.alpha.isZero
-        }
     }
 
     @objc private func showSpeedPicker() {
@@ -529,12 +486,27 @@ class PlayerController: UIViewController {
         let next = currentIndex + 1
         guard next < episodes.count else {
             Logger.shared.log("[PlayerController] Đã hết phim — không còn tập tiếp theo.")
+            showEndOfSeriesAlert()
             return
         }
         Logger.shared.log("[PlayerController] Auto-next → tập \(next + 1)/\(episodes.count)")
+
+        PlaybackStore.shared.clearPosition(for: episodeUrl)
+        if let movie = movie {
+            PlaybackStore.shared.recordWatch(movie: movie, episodeIndex: next, episodeTitle: episodes[next].title)
+        }
+
         currentIndex = next
         episodeUrl = episodes[next].link
+        updateNavBarItems()
         retry()
+    }
+
+    private func showEndOfSeriesAlert() {
+        PlaybackStore.shared.clearPosition(for: episodeUrl)
+        let alert = UIAlertController(title: "Đã hết phim", message: "Bạn đã xem hết tất cả các tập hiện có.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 
     @objc private func showEpisodePicker() {
@@ -547,6 +519,7 @@ class PlayerController: UIViewController {
             self.currentIndex = idx
             self.episodeUrl = self.episodes[idx].link
             self.dismiss(animated: true)
+            self.updateNavBarItems()
             self.retry()
         }
         if let sheet = pickerVC.sheetPresentationController {
