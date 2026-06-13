@@ -22,6 +22,23 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
     
+    /// Ép URL về đúng resolvedDomain hiện tại, dù link gốc chứa domain cũ.
+    func normalizeURL(_ urlString: String) -> String {
+        guard !urlString.hasPrefix("http") else {
+            guard let url = URL(string: urlString),
+                  let currentBase = URL(string: resolvedDomain),
+                  url.host?.lowercased() != currentBase.host?.lowercased() else {
+                return urlString
+            }
+            var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            comps?.scheme = currentBase.scheme
+            comps?.host = currentBase.host
+            comps?.port = currentBase.port
+            return comps?.url?.absoluteString ?? urlString
+        }
+        return resolvedDomain + urlString
+    }
+    
     private var webView: WKWebView!
     private var completionQueue: [(String) -> Void] = []
     private var currentLoadId: Int = 0
@@ -329,12 +346,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if let url = webView.url {
-            Logger.shared.log("[WebView] didFinish: \(url.absoluteString)")
-            if let host = url.host {
-                self.resolvedDomain = "https://" + host
-            }
-        }
+        Logger.shared.log("[WebView] didFinish: \(webView.url?.absoluteString ?? "nil")")
         syncCookiesToURLSession()
     }
 
@@ -727,12 +739,13 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     /// Fetch trang info phim → parse description, year, rating, banner, genres.
     /// Cache 24h vì info ít đổi.
     func fetchMovieDetails(movieUrl: String, completion: @escaping (MovieDetails?) -> Void) {
-        let key = "details." + (movieUrl.data(using: .utf8)?.base64EncodedString() ?? movieUrl)
+        let normalizedUrl = normalizeURL(movieUrl)
+        let key = "details." + (normalizedUrl.data(using: .utf8)?.base64EncodedString() ?? normalizedUrl)
         if let cached: MovieDetails = DiskCache.shared.get(key, ttl: 86400, as: MovieDetails.self) {
             completion(cached)
             return
         }
-        fetchHTML(url: movieUrl) { html in
+        fetchHTML(url: normalizedUrl) { html in
             let details = Self.parseDetails(from: html)
             if !details.description.isEmpty || !details.genres.isEmpty {
                 DiskCache.shared.set(details, forKey: key)
@@ -799,17 +812,16 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
 
     func fetchEpisodes(movieUrl: String, isRecursive: Bool = false, completion: @escaping ([Episode]) -> Void) {
-        // Cache 1 giờ theo URL phim.
-        let cacheKey = "episodes." + (movieUrl.data(using: .utf8)?.base64EncodedString() ?? movieUrl)
+        let normalizedUrl = normalizeURL(movieUrl)
+        let cacheKey = "episodes." + (normalizedUrl.data(using: .utf8)?.base64EncodedString() ?? normalizedUrl)
         if !isRecursive, let cached: [Episode] = DiskCache.shared.get(cacheKey, ttl: 3600, as: [Episode].self), !cached.isEmpty {
             Logger.shared.log("[fetchEpisodes] CACHE HIT \(cached.count) tập")
             completion(cached)
             return
         }
-        fetchHTML(url: movieUrl) { html in
+        fetchHTML(url: normalizedUrl) { html in
             var episodes: [Episode] = []
-            // Regex bắt tất cả các link chứa "tap-" hoặc có chữ "Tập" bên trong
-            let pattern = "(?i)<a[^>]*?href=[\"']([^\"']*?tap-[^\"']*?\\.html)[\"'][^>]*>(.*?)</a>"
+            let pattern = "(?i)<a[^>]*?href=[\"']([^\"']*?tap-[^\"']*?(?:\\.html)?)[\"'][^>]*>(.*?)</a>"
             
             if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
                 let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
@@ -827,7 +839,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                         }
                         
                         episodes.append(Episode(title: title,
-                                                link: link.hasPrefix("http") ? link : NetworkManager.shared.resolvedDomain + link,
+                                                link: NetworkManager.shared.normalizeURL(link),
                                                 episodeId: nil))
                     }
                 }
@@ -835,16 +847,13 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             
             var uniqueEps: [Episode] = []
             var seen = Set<String>()
-            // Đảo ngược danh sách vì tập 1 thường nằm cuối trong HTML (để hiển thị theo thứ tự cũ -> mới)
             for ep in episodes.reversed() {
                 if !seen.contains(ep.link) {
                     seen.insert(ep.link)
-                    uniqueEps.insert(ep, at: 0) // Giữ thứ tự đúng
+                    uniqueEps.insert(ep, at: 0)
                 }
             }
             
-            // Nếu tìm thấy <= 4 tập và chưa đệ quy, có thể ta đang ở trang thông tin (chỉ hiện tập mới cập nhật).
-            // Ta sẽ vào thẳng link tập đầu tiên tìm được để quét toàn bộ danh sách tập.
             if uniqueEps.count <= 4 && !isRecursive && !uniqueEps.isEmpty {
                 self.fetchEpisodes(movieUrl: uniqueEps[0].link, isRecursive: true, completion: completion)
             } else {
