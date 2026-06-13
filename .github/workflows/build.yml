@@ -19,13 +19,11 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      - name: Build and archive unsigned IPA
+      - name: Build unsigned IPA
         run: |
-          xcodebuild clean build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO
+          xcodebuild clean archive -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -archivePath AVS_iOS_App.xcarchive CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO
           mkdir -p Payload
-          APP=$(find ~/Library/Developer/Xcode/DerivedData -name "AVS_iOS_App.app" -path "*/Release-iphoneos/*" | head -1)
-          echo "Found app at: $APP"
-          cp -r "$APP" Payload/
+          cp -r AVS_iOS_App.xcarchive/Products/Applications/AVS_iOS_App.app Payload/
           zip -r AVS_iOS_App.ipa Payload
 
       - name: Upload IPA
