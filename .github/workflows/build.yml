@@ -19,21 +19,30 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      - name: Build (macOS default, no destination)
+      - name: Capture build output
         run: |
-          $output = & xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO 2>&1
-          Write-Output "Exit: $LASTEXITCODE"
-          $output | Select-String -Pattern "error:|BUILD" | ForEach-Object { $_.Line }
-
-      - name: Try with iphoneos sdk
-        run: |
-          $output = & xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -sdk iphoneos CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO 2>&1
+          $output = & xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1
           $ec = $LASTEXITCODE
-          Write-Output "--- Exit: $ec ---"
-          $output | Select-String -Pattern "error:|BUILD" | ForEach-Object { $_.Line }
-          if ($ec -ne 0) { throw "Build2 failed" }
+          $output | Out-File -FilePath build_log.txt -Encoding utf8
+          # Write errors to step summary
+          "## Build Output" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+          "Exit code: $ec" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          ($output | Select-String -Pattern "error:") | ForEach-Object { $_.Line } | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          ($output | Select-String -Pattern "warning:.*\w") | Select-Object -First 20 | ForEach-Object { $_.Line } | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          ($output | Select-String -Pattern "BUILD|FATAL|failed") | ForEach-Object { $_.Line } | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          if ($ec -ne 0) { throw "Build failed (exit $ec)" }
 
-      - name: Package IPA
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build_log.txt
+          retention-days: 7
+
+      - name: Upload IPA
         if: success()
         run: |
-          echo "Build succeeded!"
+          echo "PROCEED TO PACKAGE IPA"
