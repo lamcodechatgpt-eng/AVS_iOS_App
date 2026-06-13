@@ -19,19 +19,5 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      - name: Build and upload log
-        run: |
-          $output = & xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1
-          $ec = $LASTEXITCODE
-          $output | Out-File -FilePath build_log.txt -Encoding utf8
-          # Upload log to gofile
-          $pasteUrl = curl -s -F 'f:1=@build_log.txt' http://ix.io
-          Write-Output "BUILD LOG URL: $pasteUrl"
-          # Also show key lines
-          $output | Select-String -Pattern "error:|BUILD|FATAL|failed|warning:" | ForEach-Object { Write-Output ">> $($_.Line)" }
-          if ($ec -ne 0) { throw "BUILD_FAILED" }
-
-      - name: Upload IPA
-        if: success()
-        run: |
-          echo "BUILD PASSED"
+      - name: Build
+        run: xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -destination generic/platform=iOS CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO
