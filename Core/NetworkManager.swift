@@ -838,6 +838,14 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                             continue
                         }
                         
+                        // Chỉ giữ title hợp lệ: chứa "tập", hoặc số + ký tự đặc biệt
+                        let isEpisodeTitle = lowerTitle.contains("tập")
+                            || lowerTitle.contains("episode")
+                            || lowerTitle.contains("hd")
+                            || (title.rangeOfCharacter(from: .decimalDigits) != nil
+                                && title.count < 20)
+                        guard isEpisodeTitle else { continue }
+                        
                         episodes.append(Episode(title: title,
                                                 link: NetworkManager.shared.normalizeURL(link),
                                                 episodeId: nil))
