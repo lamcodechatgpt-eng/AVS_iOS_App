@@ -579,6 +579,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     // Danh sách domain AVS quen thuộc, thử lần lượt nếu domain đã lưu fail.
     // bit.ly là phương án cuối vì chậm và đôi khi rate-limit.
     private let knownDomains = [
+        "https://animevietsub.pl",
         "https://animevietsub.by",
         "https://animevietsub.cx",
         "https://animevietsub.lol",
