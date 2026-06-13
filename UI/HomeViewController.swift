@@ -111,25 +111,29 @@ final class HomeViewController: UIViewController {
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: .init(widthDimension: .absolute(140), heightDimension: .absolute(200)), subitems: [item])
         let section = NSCollectionLayoutSection(group: group)
         section.interGroupSpacing = 10
-        section.contentInsets = .init(top: 4, leading: 16, bottom: 16, trailing: 16)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 16, bottom: 16, trailing: 16)
         section.orthogonalScrollingBehavior = .continuous
         section.boundarySupplementaryItems = [headerItem()]
         return section
     }
 
     private func gridSection() -> NSCollectionLayoutSection {
-        let side = (view.bounds.width - 12 * 2 - 10 * 2) / 3
-        let item = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .absolute(side), heightDimension: .absolute(side * 1.6)))
-        let group = NSCollectionLayoutGroup.horizontal(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(side * 1.6)), subitems: [item])
-        group.interItemSpacing = .fixed(10)
+        let w = view.bounds.width
+        let side = (w - 44) / 3
+        let itemSize = NSCollectionLayoutSize(widthDimension: .absolute(side), heightDimension: .absolute(side * 1.6))
+        let item = NSCollectionLayoutItem(layoutSize: itemSize)
+        let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(side * 1.6))
+        let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+        group.interItemSpacing = NSCollectionLayoutSpacing.fixed(10)
         let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = .init(top: 4, leading: 12, bottom: 24, trailing: 12)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 12, bottom: 24, trailing: 12)
         section.boundarySupplementaryItems = [Self.headerItem()]
         return section
     }
 
     private static func headerItem() -> NSCollectionLayoutBoundarySupplementaryItem {
-        .init(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(44)),
+        let size = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(44))
+        return NSCollectionLayoutBoundarySupplementaryItem(layoutSize: size,
               elementKind: UICollectionView.elementKindSectionHeader,
               alignment: .top)
     }

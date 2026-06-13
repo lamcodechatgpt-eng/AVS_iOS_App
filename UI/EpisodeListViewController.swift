@@ -52,7 +52,7 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
         collectionView.delegate = self
         collectionView.alwaysBounceVertical = true
         collectionView.register(EpisodeCell.self, forCellWithReuseIdentifier: "EpisodeCell")
-        collectionView.register(SectionHeaderView.self,
+        collectionView.register(SectionHeader.self,
                                 forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
                                 withReuseIdentifier: "Header")
 
@@ -105,7 +105,7 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
     }
 
     func collectionView(_ cv: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
-        let h = cv.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "Header", for: indexPath) as! SectionHeaderView
+        let h = cv.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "Header", for: indexPath) as! SectionHeader
         h.titleLabel.text = "📺 Danh sách tập (\(episodes.count) tập)"
         return h
     }
