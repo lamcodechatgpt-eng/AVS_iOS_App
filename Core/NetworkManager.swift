@@ -49,6 +49,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     private var completionQueue: [(String) -> Void] = []
     private var currentLoadId: Int = 0
     
+    var domainFailureHandler: ((String) -> Void)?
+    
     override init() {
         super.init()
         DispatchQueue.main.async {
@@ -362,6 +364,22 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         // Sync cookies WKWebView → URLSession (HTTPCookieStorage.shared) để URLSession
         // dùng được cookie CF clearance + session AVS đã tích.
         syncCookiesToURLSession()
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return }
+        // Chỉ xử lý lỗi kết nối (timeout, không tìm thấy host, mạng mất…)
+        switch nsError.code {
+        case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost,
+             NSURLErrorNetworkConnectionLost, NSURLErrorDNSLookupFailed,
+             NSURLErrorNotConnectedToInternet, NSURLErrorTimedOut:
+            if let url = webView.url?.host {
+                domainFailureHandler?(url)
+            }
+        default:
+            break
+        }
     }
 
     private func syncCookiesToURLSession() {
