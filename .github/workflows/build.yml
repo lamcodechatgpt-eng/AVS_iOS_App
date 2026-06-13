@@ -9,6 +9,10 @@ jobs:
   build:
     runs-on: macos-latest
 
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -16,37 +20,31 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Show Xcode version
-        run: xcodebuild -version; xcodegen --version
-
       - name: Generate Xcode Project
         run: xcodegen generate
 
       - name: Build and capture output
         id: build
         run: |
-          $output = & xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1
-          $ec = $LASTEXITCODE
-          $output | Out-File -FilePath build_log.txt -Encoding utf8
-          Write-Output "exit_code=$ec" >> $env:GITHUB_OUTPUT
-          # Print summary for annotations
-          $output | Select-String -Pattern "error:|BUILD|FATAL|failed" | ForEach-Object { Write-Output ">> $($_.Line)" }
+          xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1 | tee build_log.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
       - name: Upload log to Gist
         if: always()
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          if ($env:GH_TOKEN) {
-            $gist = gh gist create build_log.txt --public --desc "AVS iOS Build $(Get-Date -Format yyyy-MM-dd-HHmm)"
-            Write-Output "GIST: $gist"
-            "### [Build Log Gist]($gist)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-          } else {
-            Write-Output "No GH_TOKEN secret set, skipping gist upload"
-          }
+          if [ -f build_log.txt ] && [ -n "$GH_TOKEN" ]; then
+            gist_url=$(gh gist create build_log.txt --public --desc "AVS iOS Build $(date +%Y-%m-%d-%H%M)")
+            echo "GIST: $gist_url"
+            echo "### [Build Log Gist]($gist_url)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No GH_TOKEN or no log file, skipping gist"
+          fi
 
       - name: Check build result
         if: steps.build.outputs.exit_code != '0'
         run: |
-          "### Build FAILED (exit code ${{ steps.build.outputs.exit_code }})" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+          echo "### Build FAILED (exit code ${{ steps.build.outputs.exit_code }})" >> $GITHUB_STEP_SUMMARY
           exit 1
