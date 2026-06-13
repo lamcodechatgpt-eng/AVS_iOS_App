@@ -19,17 +19,19 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      - name: Build unsigned IPA
+      - name: Attempt archive, capture log
         run: |
-          xcodebuild clean archive -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -archivePath AVS_iOS_App.xcarchive CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO
-          mkdir -p Payload
-          cp -r AVS_iOS_App.xcarchive/Products/Applications/AVS_iOS_App.app Payload/
-          zip -r AVS_iOS_App.ipa Payload
+          xcodebuild archive -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -archivePath AVS_iOS_App.xcarchive CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log || true
+          tail -50 build.log
 
-      - name: Upload IPA
+      - name: Try build instead
+        run: |
+          xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -sdk iphoneos CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1 | tee build2.log || true
+          tail -50 build2.log
+
+      - name: Upload log
         uses: actions/upload-artifact@v4
-        continue-on-error: true
         with:
-          name: AVS_iOS_App-IPA
-          path: AVS_iOS_App.ipa
-          retention-days: 1
+          name: build-log
+          path: build.log
+          retention-days: 3
