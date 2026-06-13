@@ -55,11 +55,15 @@ final class TabCoordinator: Coordinator {
         homeNav.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: "house"), selectedImage: UIImage(systemName: "house.fill"))
         homeNav.tabBarItem.imageInsets = UIEdgeInsets(top: 6, left: 0, bottom: -6, right: 0)
 
-        let historyNav = UINavigationController()
+        let historyVC = MovieListViewController()
+        historyVC.source = .history
+        let historyNav = UINavigationController(rootViewController: historyVC)
         historyNav.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: "clock"), selectedImage: UIImage(systemName: "clock.fill"))
         historyNav.tabBarItem.imageInsets = UIEdgeInsets(top: 6, left: 0, bottom: -6, right: 0)
 
-        let favoritesNav = UINavigationController()
+        let favoritesVC = MovieListViewController()
+        favoritesVC.source = .favorites
+        let favoritesNav = UINavigationController(rootViewController: favoritesVC)
         favoritesNav.tabBarItem = UITabBarItem(title: nil, image: UIImage(systemName: "heart"), selectedImage: UIImage(systemName: "heart.fill"))
         favoritesNav.tabBarItem.imageInsets = UIEdgeInsets(top: 6, left: 0, bottom: -6, right: 0)
 

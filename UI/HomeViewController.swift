@@ -345,7 +345,7 @@ extension HomeViewController: UICollectionViewDelegate, UICollectionViewDataSour
 
     func collectionView(_: UICollectionView, didSelectItemAt ip: IndexPath) {
         guard let item = dataSource.itemIdentifier(for: ip) else { return }
-        if ip.section == HomeSection.grid.rawValue, let movie = item.movie {
+        if let movie = item.movie {
             coordinator?.showDetail(for: movie)
         }
     }
