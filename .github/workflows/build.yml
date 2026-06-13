@@ -19,19 +19,28 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      - name: Attempt archive, capture log
+      - name: Build for iOS (Release)
         run: |
-          xcodebuild archive -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -archivePath AVS_iOS_App.xcarchive CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log || true
-          tail -50 build.log
+          $output = & xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -destination generic/platform=iOS CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath build_output.txt
+          if ($exitCode -ne 0) { throw "Build failed with exit code $exitCode" }
 
-      - name: Try build instead
+      - name: Package IPA
+        if: success()
         run: |
-          xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -sdk iphoneos CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1 | tee build2.log || true
-          tail -50 build2.log
+          $app = & xcodebuild -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -showBuildSettings -destination generic/platform=iOS CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO 2>&1 | Select-String "BUILT_PRODUCTS_DIR" | ForEach-Object { $_.Line.Split("=")[1].Trim() }
+          $appPath = Join-Path $app "AVS_iOS_App.app"
+          Write-Output "App path: $appPath"
+          mkdir -p Payload
+          Copy-Item -Recurse -Path $appPath -Destination Payload/
+          Compress-Archive -Path Payload -DestinationPath AVS_iOS_App.zip
+          Rename-Item AVS_iOS_App.zip AVS_iOS_App.ipa
 
-      - name: Upload log
+      - name: Upload IPA
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
-          path: build.log
-          retention-days: 3
+          name: AVS_iOS_App-IPA
+          path: AVS_iOS_App.ipa
+          retention-days: 1
