@@ -20,4 +20,4 @@ jobs:
         run: xcodegen generate
 
       - name: Build
-        run: xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -destination generic/platform=iOS CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO
+        run: xcodebuild clean build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO
