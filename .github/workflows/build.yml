@@ -13,8 +13,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install xcodegen
-        run: brew install xcodegen
+      - name: Show environment versions
+        run: |
+          echo "Xcode: $(xcodebuild -version)"
+          echo "xcodegen: $(xcodegen --version)"
+          echo "Swift: $(swift --version)"
 
       - name: Generate Xcode Project
         run: xcodegen generate
