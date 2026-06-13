@@ -5,10 +5,18 @@ targets:
   AVS_iOS_App:
     type: application
     platform: iOS
-    deploymentTarget: "15.0"
+    deploymentTarget: "16.0"
     sources:
       - path: Core
+        type: group
+      - path: Core/Extensions
+        type: group
+      - path: Core/Coordinators
+        type: group
       - path: UI
+        type: group
+      - path: UI/Components
+        type: group
       - path: Assets.xcassets
       - path: AppDelegate.swift
     info:

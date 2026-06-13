@@ -190,19 +190,13 @@ final class HomeViewController: UIViewController {
     }
 
     private func applySnapshot() {
-        var sections: [HomeSection] = [.hero]
-        if !continueWatching.isEmpty { sections.append(.continueWatching) }
-        sections.append(.grid)
-
         var snap = NSDiffableDataSourceSnapshot<HomeSection, HomeItem>()
-        snap.appendSections(sections)
+        snap.appendSections(HomeSection.allCases)
 
         if !heroMovies.isEmpty {
             snap.appendItems(heroMovies.map { HomeItem(movie: $0) }, toSection: .hero)
         }
-        if !continueWatching.isEmpty {
-            snap.appendItems(continueWatching, toSection: .continueWatching)
-        }
+        snap.appendItems(continueWatching, toSection: .continueWatching)
         snap.appendItems(movies.map { HomeItem(movie: $0) }, toSection: .grid)
 
         dataSource.apply(snap, animatingDifferences: false)
