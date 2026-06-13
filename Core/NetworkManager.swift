@@ -11,13 +11,14 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") ?? Self.defaultDomain
         }
         set {
-            guard newValue.hasPrefix("http") else {
+            let cleaned = newValue.hasSuffix("/") ? String(newValue.dropLast()) : newValue
+            guard cleaned.hasPrefix("http") else {
                 Logger.shared.log("Bỏ qua domain không hợp lệ: \(newValue)")
                 return
             }
-            if UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") != newValue {
-                UserDefaults.standard.set(newValue, forKey: "AVS_ResolvedDomain")
-                Logger.shared.log("Đã cập nhật domain mới: \(newValue)")
+            if UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") != cleaned {
+                UserDefaults.standard.set(cleaned, forKey: "AVS_ResolvedDomain")
+                Logger.shared.log("Đã cập nhật domain mới: \(cleaned)")
             }
         }
     }
@@ -36,7 +37,9 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             comps?.port = currentBase.port
             return comps?.url?.absoluteString ?? urlString
         }
-        return resolvedDomain + urlString
+        let base = resolvedDomain.hasSuffix("/") ? String(resolvedDomain.dropLast()) : resolvedDomain
+        let path = urlString.hasPrefix("/") ? urlString : "/" + urlString
+        return base + path
     }
     
     private var webView: WKWebView!
@@ -363,7 +366,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     func fetchSearchSuggestions(keyword: String, completion: @escaping ([Movie]) -> Void) {
         let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { completion([]); return }
-        let url = URL(string: "\(resolvedDomain)/ajax/suggest")!
+        guard let url = URL(string: "\(resolvedDomain)/ajax/suggest") else { completion([]); return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 6
@@ -821,36 +824,38 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
         fetchHTML(url: normalizedUrl) { html in
             var episodes: [Episode] = []
-            let pattern = "(?i)<a[^>]*?href=[\"']([^\"']*?tap-[^\"']*?(?:\\.html)?)[\"'][^>]*>(.*?)</a>"
             
-            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+            let patterns = [
+                "(?i)<a[^>]*?href=[\"']([^\"']*?tap-[^\"']*?(?:\\.html)?)[\"'][^>]*>(.*?)</a>",
+                "(?i)<a[^>]*?href=[\"']([^\"']*?(?:/episode|/xem-phim|/tap)[^\"']*?(?:\\.html)?)[\"'][^>]*>(.*?)</a>"
+            ]
+            for pattern in patterns {
+                guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { continue }
                 let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
                 for match in matches {
-                    if let linkRange = Range(match.range(at: 1), in: html),
-                       let titleRange = Range(match.range(at: 2), in: html) {
-                        
-                        let link = String(html[linkRange])
-                        let title = String(html[titleRange]).replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression, range: nil).trimmingCharacters(in: .whitespacesAndNewlines)
-                        
-                        let lowerTitle = title.lowercased()
-                        let lowerLink = link.lowercased()
-                        if lowerTitle.contains("đăng nhập") || lowerTitle.contains("login") || lowerLink.contains("login") || lowerTitle.contains("đăng ký") {
-                            continue
-                        }
-                        
-                        // Chỉ giữ title hợp lệ: chứa "tập", hoặc số + ký tự đặc biệt
-                        let isEpisodeTitle = lowerTitle.contains("tập")
-                            || lowerTitle.contains("episode")
-                            || lowerTitle.contains("hd")
-                            || (title.rangeOfCharacter(from: .decimalDigits) != nil
-                                && title.count < 20)
-                        guard isEpisodeTitle else { continue }
-                        
-                        episodes.append(Episode(title: title,
-                                                link: NetworkManager.shared.normalizeURL(link),
-                                                episodeId: nil))
+                    guard let linkRange = Range(match.range(at: 1), in: html),
+                          let titleRange = Range(match.range(at: 2), in: html) else { continue }
+                    
+                    let link = String(html[linkRange])
+                    let title = String(html[titleRange]).replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression, range: nil).trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    let lowerTitle = title.lowercased()
+                    let lowerLink = link.lowercased()
+                    if lowerTitle.contains("đăng nhập") || lowerTitle.contains("login") || lowerLink.contains("login") || lowerTitle.contains("đăng ký") {
+                        continue
+                    }
+                    
+                    let isEpisodeTitle = lowerTitle.contains("tập")
+                        || lowerTitle.contains("episode")
+                        || (title.rangeOfCharacter(from: .decimalDigits) != nil && title.count < 30)
+                    guard isEpisodeTitle else { continue }
+                    
+                    let fullLink = NetworkManager.shared.normalizeURL(link)
+                    if !episodes.contains(where: { $0.link == fullLink }) {
+                        episodes.append(Episode(title: title, link: fullLink))
                     }
                 }
+                if !episodes.isEmpty { break }
             }
             
             var uniqueEps: [Episode] = []
@@ -863,7 +868,15 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             }
             
             if uniqueEps.count <= 4 && !isRecursive && !uniqueEps.isEmpty {
-                self.fetchEpisodes(movieUrl: uniqueEps[0].link, isRecursive: true, completion: completion)
+                self.fetchEpisodes(movieUrl: uniqueEps[0].link, isRecursive: true) { innerEps in
+                    var merged = uniqueEps
+                    var seenInner = Set(merged.map { $0.link })
+                    for ep in innerEps where seenInner.insert(ep.link).inserted {
+                        merged.append(ep)
+                    }
+                    if !merged.isEmpty { DiskCache.shared.set(merged, forKey: cacheKey) }
+                    completion(merged)
+                }
             } else {
                 if !uniqueEps.isEmpty { DiskCache.shared.set(uniqueEps, forKey: cacheKey) }
                 completion(uniqueEps)

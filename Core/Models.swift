@@ -10,7 +10,6 @@ struct Movie: Codable, Hashable {
 struct Episode: Codable {
     var title: String
     var link: String
-    var episodeId: String?
 }
 
 /// Thông tin chi tiết phim hiện ở MovieInfoVC. Tách khỏi Movie (list) để

@@ -2,20 +2,24 @@ import Foundation
 
 class Extractor {
 
-    /// Giải mã HTML entity quan trọng cho URL. JS hook chèn URL vào DOM bằng
-    /// `innerText` nên browser tự encode `&` thành `&amp;` khi serialize ra
-    /// outerHTML. Nếu không decode, AVPlayer gửi `&amp;` lên server → server
-    /// thấy query param dính vào nhau, JWT không khớp, trả 403.
+    /// Giải mã HTML entity quan trọng cho URL.
     private static func htmlDecode(_ s: String) -> String {
-        return s
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&#38;", with: "&")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#34;", with: "\"")
-            .replacingOccurrences(of: "&apos;", with: "'")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
+        var result = s
+        let entities = [
+            "&amp;": "&", "&#38;": "&",
+            "&quot;": "\"", "&#34;": "\"",
+            "&apos;": "'", "&#39;": "'",
+            "&lt;": "<", "&gt;": ">",
+            "&#x2F;": "/", "&#47;": "/",
+            "&#x3A;": ":", "&#58;": ":",
+            "&#x3D;": "=", "&#61;": "=",
+            "&#x3F;": "?", "&#63;": "?",
+            "&#x25;": "%", "&#37;": "%"
+        ]
+        for (entity, char) in entities {
+            result = result.replacingOccurrences(of: entity, with: char)
+        }
+        return result
     }
 
     // 1. Lấy link iframe hoặc direct link từ trang xem-phim.html
@@ -31,14 +35,27 @@ class Extractor {
             // Referer mặc định khi luồng trỏ thẳng từ AVS (không qua iframe).
             let defaultReferer = "\(NetworkManager.shared.resolvedDomain)/"
 
-            // (a) Thử bóc object PLAYER_DATA. Trang dùng cả `window.PLAYER_DATA = {...}` lẫn
-            //     `var PLAYER_DATA = {...}` tùy theme nên không bắt buộc tiền tố `window.`.
+            // (a) Thử bóc object PLAYER_DATA.
             let playerDataPattern = "(?:window\\.)?PLAYER_DATA\\s*=\\s*(\\{[\\s\\S]*?\\})\\s*;"
             if let regex = try? NSRegularExpression(pattern: playerDataPattern),
                let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                let range = Range(match.range(at: 1), in: html) {
 
-                let jsonString = String(html[range])
+                var jsonString = String(html[range])
+                // Cân bằng dấu ngoặc nhọn: regex lazy chỉ bắt được tới `}` đầu tiên,
+                // nếu JSON lồng nhau thì thiếu. Ta mở rộng bằng cách đếm { }.
+                let fullRange = match.range(at: 1)
+                let remainderStart = fullRange.upperBound
+                let remainder = html[html.index(html.startIndex, offsetBy: remainderStart)...]
+                var depth = 1
+                var extra = ""
+                for ch in remainder {
+                    if ch == "{" { depth += 1 }
+                    else if ch == "}" { depth -= 1 }
+                    extra.append(ch)
+                    if depth == 0 { break }
+                }
+                jsonString.append(extra)
                 if let jsonData = jsonString.data(using: .utf8),
                    let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                    let link = json["link"] as? String {

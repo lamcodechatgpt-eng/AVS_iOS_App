@@ -5,6 +5,7 @@ import Foundation
 final class PlaybackStore {
     static let shared = PlaybackStore()
     private let defaults = UserDefaults.standard
+    private let queue = DispatchQueue(label: "com.avs.playbackstore.sync")
     private init() {}
 
     // MARK: - Position per episode

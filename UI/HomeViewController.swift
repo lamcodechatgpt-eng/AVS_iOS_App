@@ -188,8 +188,15 @@ final class HomeViewController: UIViewController {
     }
 
     private func loadContinueWatching() {
-        continueWatching = PlaybackStore.shared.history().map {
-            HomeItem(movie: $0.movie, progress: 0)
+        let store = PlaybackStore.shared
+        let entries = store.history()
+        continueWatching = entries.map { entry in
+            var lastProgress: Double = 0
+            if let epsUrl = entry.movie.link.data(using: .utf8) {
+                let pos = store.position(for: entry.movie.link)
+                lastProgress = pos ?? 0
+            }
+            return HomeItem(movie: entry.movie, progress: lastProgress)
         }
     }
 
@@ -200,7 +207,9 @@ final class HomeViewController: UIViewController {
         if !heroMovies.isEmpty {
             snap.appendItems(heroMovies.map { HomeItem(movie: $0) }, toSection: .hero)
         }
-        snap.appendItems(continueWatching, toSection: .continueWatching)
+        if !continueWatching.isEmpty {
+            snap.appendItems(continueWatching, toSection: .continueWatching)
+        }
         snap.appendItems(movies.map { HomeItem(movie: $0) }, toSection: .grid)
 
         dataSource.apply(snap, animatingDifferences: false)
@@ -361,6 +370,7 @@ extension HomeViewController: UICollectionViewDelegate, UICollectionViewDataSour
     }
     func collectionView(_: UICollectionView, willDisplay _: UICollectionViewCell, forItemAt ip: IndexPath) {
         guard ip.section == HomeSection.grid.rawValue else { return }
+        guard movies.count >= 6 else { return }
         if ip.row >= movies.count - 6 { loadMore() }
     }
 
@@ -469,6 +479,7 @@ final class HeroBannerCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         imageView.image = nil
+        overlayGradient.removeFromSuperlayer()
     }
 
     func configure(with movie: Movie) {
@@ -485,6 +496,7 @@ final class ContinueWatchingCell: UICollectionViewCell {
     private let imageView = UIImageView()
     private let progressBar = UIView()
     private let progressTrack = UIView()
+    private var progressWidthConstraint: NSLayoutConstraint!
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -505,6 +517,9 @@ final class ContinueWatchingCell: UICollectionViewCell {
         progressBar.translatesAutoresizingMaskIntoConstraints = false
         progressTrack.addSubview(progressBar)
 
+        progressWidthConstraint = progressBar.widthAnchor.constraint(equalTo: progressTrack.widthAnchor, multiplier: 0)
+        progressWidthConstraint.isActive = true
+
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
             imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -518,8 +533,7 @@ final class ContinueWatchingCell: UICollectionViewCell {
 
             progressBar.leadingAnchor.constraint(equalTo: progressTrack.leadingAnchor),
             progressBar.topAnchor.constraint(equalTo: progressTrack.topAnchor),
-            progressBar.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor),
-            progressBar.widthAnchor.constraint(equalTo: progressTrack.widthAnchor, multiplier: 0.6)
+            progressBar.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor)
         ])
     }
 
@@ -534,6 +548,10 @@ final class ContinueWatchingCell: UICollectionViewCell {
         if let urlStr = thumbUrl, let url = URL(string: urlStr) {
             ImageLoader.shared.load(url, into: imageView)
         }
+        let ratio = min(max(progress / 1440, 0), 1)
+        progressWidthConstraint.isActive = false
+        progressWidthConstraint = progressBar.widthAnchor.constraint(equalTo: progressTrack.widthAnchor, multiplier: CGFloat(ratio))
+        progressWidthConstraint.isActive = true
     }
 }
 

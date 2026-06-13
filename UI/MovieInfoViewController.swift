@@ -217,8 +217,8 @@ class MovieInfoViewController: UIViewController {
             let chip = UILabel()
             chip.text = "  \(g)  "
             chip.font = .systemFont(ofSize: 12, weight: .semibold)
-            chip.textColor = .systemRed
-            chip.backgroundColor = UIColor.systemRed.withAlphaComponent(0.1)
+            chip.textColor = .accent
+            chip.backgroundColor = UIColor.accent.withAlphaComponent(0.12)
             chip.layer.cornerRadius = 12
             chip.clipsToBounds = true
             genreStack.addArrangedSubview(chip)
@@ -232,7 +232,13 @@ class MovieInfoViewController: UIViewController {
                 self.episodes = eps
                 self.loader.stopAnimating()
                 self.loader.isHidden = true
-                self.watchButton.setTitle("▶  Xem tập 1", for: .normal)
+                if eps.isEmpty {
+                    self.watchButton.setTitle("Không có tập nào", for: .normal)
+                    self.watchButton.isEnabled = false
+                } else {
+                    self.watchButton.setTitle("▶  Xem tập 1", for: .normal)
+                    self.watchButton.isEnabled = true
+                }
                 self.loadResumeIfAny()
             }
         }

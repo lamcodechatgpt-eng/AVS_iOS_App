@@ -19,6 +19,24 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
         fetchEpisodes()
     }
 
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate { _ in
+            self.updateCollectionViewLayout()
+        }
+    }
+
+    private func updateCollectionViewLayout() {
+        guard let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else { return }
+        let columns: CGFloat = 5
+        let interItem: CGFloat = 8
+        let sideInset: CGFloat = 12
+        let totalSpacing = sideInset * 2 + interItem * (columns - 1)
+        let cellWidth = (view.bounds.width - totalSpacing) / columns
+        layout.itemSize = CGSize(width: cellWidth, height: 50)
+        layout.invalidateLayout()
+    }
+
     private func setupBackground() {
         bgView.setStyle(.accent)
         bgView.translatesAutoresizingMaskIntoConstraints = false

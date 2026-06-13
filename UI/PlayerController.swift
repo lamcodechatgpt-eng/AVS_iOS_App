@@ -2,10 +2,10 @@ import UIKit
 import AVKit
 
 class PlayerController: UIViewController {
-    var episodeUrl: String! // Truyền link tập phim từ UI vào đây
-    var episodes: [Episode] = []        // Toàn bộ danh sách tập của phim hiện tại
-    var currentIndex: Int = 0           // Vị trí tập đang phát trong `episodes`
-    var movie: Movie?                   // Phim đang xem (để ghi lịch sử / favorite)
+    var episodeUrl: String?
+    var episodes: [Episode] = []
+    var currentIndex: Int = 0
+    var movie: Movie?
 
     private var periodicTimeToken: Any?
     private var resumeStatusObservation: NSKeyValueObservation?
@@ -48,11 +48,9 @@ class PlayerController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // Lưu vị trí cuối cùng. KHÔNG pause vì PiP cần tiếp tục chạy.
-        if let player = currentPlayer, !episodeUrl.isEmpty {
-            let secs = CMTimeGetSeconds(player.currentTime())
-            if secs.isFinite { PlaybackStore.shared.savePosition(secs, for: episodeUrl) }
-        }
+        guard let player = currentPlayer, let url = episodeUrl, !url.isEmpty else { return }
+        let secs = CMTimeGetSeconds(player.currentTime())
+        if secs.isFinite { PlaybackStore.shared.savePosition(secs, for: url) }
         if let token = periodicTimeToken {
             currentPlayer?.removeTimeObserver(token)
             periodicTimeToken = nil
@@ -104,6 +102,11 @@ class PlayerController: UIViewController {
             }
         }
 
+        guard let episodeUrl = episodeUrl else {
+            self.showFailure()
+            Logger.shared.log("[PlayerController] episodeUrl = nil")
+            return
+        }
         Extractor.resolveStream(episodeUrl: episodeUrl) { [weak self] stream in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -113,15 +116,12 @@ class PlayerController: UIViewController {
 
                 guard let stream = stream else {
                     self.showFailure()
-                    Logger.shared.log("[PlayerController] resolveStream trả về nil cho \(self.episodeUrl ?? "")")
+                    Logger.shared.log("[PlayerController] resolveStream trả về nil cho \(episodeUrl)")
                     return
                 }
 
                 Logger.shared.log("[PlayerController] Tạo AVPlayer với m3u8=\(stream.url.absoluteString) referer=\(stream.referer)")
                 self.statusLabel.text = "Đang khởi động player..."
-                // KHÔNG preflight: server stream rate-limit theo URL (HTTP 429 nếu hit 2 lần
-                // trong vài giây). JWPlayer trong iframe đã fetch lúc capture URL — preflight
-                // HEAD sẽ là request thứ 2, đẩy AVPlayer xuống request thứ 3 → 429.
                 self.attachPlayer(for: stream)
             }
         }
@@ -297,7 +297,7 @@ class PlayerController: UIViewController {
 
         // Seek-to-resume khi user quay lại tập đang xem dở.
         // Quan sát readyToPlay rồi seek (không seek trước khi item ready).
-        let savedPosition = PlaybackStore.shared.position(for: episodeUrl)
+        let savedPosition = PlaybackStore.shared.position(for: episodeUrl ?? "")
         if let pos = savedPosition, pos > 30 {
             let token = item.observe(\.status, options: [.new]) { [weak item, weak self] obs, _ in
                 guard obs.status == .readyToPlay, let item = item else { return }
@@ -315,10 +315,10 @@ class PlayerController: UIViewController {
         // Lưu vị trí mỗi 5s.
         let interval = CMTime(seconds: 5, preferredTimescale: 600)
         periodicTimeToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            guard let self = self else { return }
+            guard let self = self, let url = self.episodeUrl else { return }
             let secs = CMTimeGetSeconds(time)
             if secs.isFinite {
-                PlaybackStore.shared.savePosition(secs, for: self.episodeUrl)
+                PlaybackStore.shared.savePosition(secs, for: url)
             }
         }
 
@@ -465,7 +465,10 @@ class PlayerController: UIViewController {
     }
 
     @objc private func retry() {
-        // Gỡ player cũ + observer
+        if let url = episodeUrl, let player = currentPlayer {
+            let secs = CMTimeGetSeconds(player.currentTime())
+            if secs.isFinite { PlaybackStore.shared.savePosition(secs, for: url) }
+        }
         diagTimer?.invalidate(); diagTimer = nil
         m3u8Loader = nil
         statusObservation?.invalidate()
@@ -480,7 +483,6 @@ class PlayerController: UIViewController {
             child.view.removeFromSuperview()
             child.removeFromParent()
         }
-        Logger.shared.clear()
         startResolve()
     }
 
@@ -540,7 +542,7 @@ class PlayerController: UIViewController {
         }
         Logger.shared.log("[PlayerController] Auto-next → tập \(next + 1)/\(episodes.count)")
 
-        PlaybackStore.shared.clearPosition(for: episodeUrl)
+        if let url = episodeUrl { PlaybackStore.shared.clearPosition(for: url) }
         if let movie = movie {
             PlaybackStore.shared.recordWatch(movie: movie, episodeIndex: next, episodeTitle: episodes[next].title)
         }
@@ -553,7 +555,7 @@ class PlayerController: UIViewController {
     }
 
     private func showEndOfSeriesAlert() {
-        PlaybackStore.shared.clearPosition(for: episodeUrl)
+        if let url = episodeUrl { PlaybackStore.shared.clearPosition(for: url) }
         let alert = UIAlertController(title: "Đã hết phim", message: "Bạn đã xem hết tất cả các tập hiện có.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
