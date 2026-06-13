@@ -23,40 +23,33 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      - name: Test 1 - minimal build (no flags)
-        continue-on-error: true
+      - name: Build and package
+        id: build
         run: |
-          xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App 2>&1 | tee build1.txt; ec1=${PIPESTATUS[0]}; echo "EC1=$ec1" >> $GITHUB_STEP_SUMMARY
+          xcodebuild clean build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1 | tee build_log.txt
+          ec=${PIPESTATUS[0]}
+          echo "exit_code=$ec" >> $GITHUB_OUTPUT
+          if [ $ec -ne 0 ]; then
+            echo "BUILD FAILED ($ec)"
+            exit $ec
+          fi
+          mkdir -p Payload
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -name "AVS_iOS_App.app" -path "*/Release-iphoneos/*" | head -1)
+          cp -r "$APP" Payload/
+          zip -r AVS_iOS_App.ipa Payload
 
-      - name: Test 2 - with CODE_SIGNING_REQUIRED=NO
-        continue-on-error: true
-        run: |
-          xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App CODE_SIGNING_REQUIRED=NO 2>&1 | tee build2.txt; ec2=${PIPESTATUS[0]}; echo "EC2=$ec2" >> $GITHUB_STEP_SUMMARY
-
-      - name: Test 3 - with deployment target check
+      - name: Upload build log
         if: always()
-        run: |
-          for f in build1.txt build2.txt; do
-            if [ -f "$f" ]; then
-              echo "=== $f ===" >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              grep -i "error\|BUILD\|failed\|fatal" "$f" | tail -20 >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              wc -c "$f" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build_log.txt
+          retention-days: 7
 
-      - name: Upload logs to Gist
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          for f in build1.txt build2.txt; do
-            if [ -f "$f" ] && [ -n "$GH_TOKEN" ]; then
-              echo "Uploading $f ($(wc -c < $f) bytes)..."
-              url=$(gh gist create "$f" --public --desc "AVS build log $f $(date +%H%M%S)" 2>&1)
-              echo "Gist for $f: $url"
-              echo "$f -> $url" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
-          echo "Done uploading gists"
+      - name: Upload IPA
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AVS_iOS_App-IPA
+          path: AVS_iOS_App.ipa
+          retention-days: 1
