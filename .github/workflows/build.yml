@@ -26,21 +26,27 @@ jobs:
       - name: Build and capture output
         id: build
         run: |
-          xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1 | tee build_log.txt
+          xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -destination generic/platform=iOS CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1 | tee build_log.txt; ec=${PIPESTATUS[0]}; echo "XCODEBUILD_EXIT=$ec"; echo "exit_code=$ec" >> $GITHUB_OUTPUT
           echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
-      - name: Upload log to Gist
+      - name: Show build log excerpt and upload
         if: always()
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          if [ -f build_log.txt ] && [ -n "$GH_TOKEN" ]; then
-            gist_url=$(gh gist create build_log.txt --public --desc "AVS iOS Build $(date +%Y-%m-%d-%H%M)")
-            echo "GIST: $gist_url"
-            echo "### [Build Log Gist]($gist_url)" >> $GITHUB_STEP_SUMMARY
+          if [ -f build_log.txt ]; then
+            echo "### Build output (last 80 lines):" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -80 build_log.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            if [ -n "$GH_TOKEN" ]; then
+              gist_url=$(gh gist create build_log.txt --public --desc "AVS iOS Build $(date +%Y-%m-%d-%H%M)")
+              echo "GIST URL: $gist_url"
+              echo "### [📄 Full build log Gist]($gist_url)" >> $GITHUB_STEP_SUMMARY
+            fi
           else
-            echo "No GH_TOKEN or no log file, skipping gist"
+            echo "No build_log.txt found - xcodebuild produced no output" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Check build result
