@@ -1,6 +1,6 @@
 import Foundation
 
-struct Movie: Codable {
+struct Movie: Codable, Hashable {
     var title: String
     var link: String
     var thumbUrl: String

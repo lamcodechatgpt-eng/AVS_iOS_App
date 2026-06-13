@@ -19,7 +19,12 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      - name: Build unsigned IPA
+      - name: Compile check
+        continue-on-error: true
+        run: |
+          xcodebuild clean build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO
+
+      - name: Archive IPA
         run: |
           xcodebuild clean archive -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -archivePath AVS_iOS_App.xcarchive CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO
           mkdir -p Payload
