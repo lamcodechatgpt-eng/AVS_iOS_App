@@ -4,37 +4,14 @@ import WebKit
 class NetworkManager: NSObject, WKNavigationDelegate {
     static let shared = NetworkManager()
     
-    // Link gốc bất tử (bit.ly) dùng để dự phòng khi domain chết
-    let backupUrl = "https://bit.ly/animevietsubtv"
-
-    // Domain hiện tại, tự động lưu vào máy để các lần mở app sau load cực nhanh không cần qua bit.ly.
-    // Chỉ chấp nhận host khớp với một trong các mẫu AVS để tránh bị nhiễm bởi iframe player
-    // (vd stream.googleapiscdn.com) trong didFinish.
-    private static let defaultDomain = "https://animevietsub.by"
-    private static func isAVSHost(_ host: String) -> Bool {
-        let h = host.lowercased()
-        return h.contains("animevietsub")
-            || h.contains("avsub")
-            || h.contains("vsub")
-            || h.contains("animevsub")
-    }
+    private static let defaultDomain = "https://animevietsub.pl"
 
     var resolvedDomain: String {
         get {
-            let stored = UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") ?? Self.defaultDomain
-            // Phòng vệ: nếu giá trị đã lưu trước đây bị ghi đè bằng host khác (vd
-            // stream.googleapiscdn.com từ iframe player) thì trả về default thay vì
-            // dùng giá trị hỏng. Đồng thời xoá luôn để các lần sau không sa lại.
-            if let url = URL(string: stored), let host = url.host, Self.isAVSHost(host) {
-                return stored
-            }
-            UserDefaults.standard.removeObject(forKey: "AVS_ResolvedDomain")
-            return Self.defaultDomain
+            UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") ?? Self.defaultDomain
         }
         set {
-            guard newValue.hasPrefix("http"),
-                  let host = URL(string: newValue)?.host,
-                  Self.isAVSHost(host) else {
+            guard newValue.hasPrefix("http") else {
                 Logger.shared.log("Bỏ qua domain không hợp lệ: \(newValue)")
                 return
             }
@@ -48,8 +25,6 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     private var webView: WKWebView!
     private var completionQueue: [(String) -> Void] = []
     private var currentLoadId: Int = 0
-    
-    var domainFailureHandler: ((String) -> Void)?
     
     override init() {
         super.init()
@@ -354,32 +329,13 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Setter của resolvedDomain đã tự lọc theo isAVSHost, ở đây chỉ cần log để debug.
         if let url = webView.url {
             Logger.shared.log("[WebView] didFinish: \(url.absoluteString)")
             if let host = url.host {
                 self.resolvedDomain = "https://" + host
             }
         }
-        // Sync cookies WKWebView → URLSession (HTTPCookieStorage.shared) để URLSession
-        // dùng được cookie CF clearance + session AVS đã tích.
         syncCookiesToURLSession()
-    }
-
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        let nsError = error as NSError
-        guard nsError.domain == NSURLErrorDomain else { return }
-        // Chỉ xử lý lỗi kết nối (timeout, không tìm thấy host, mạng mất…)
-        switch nsError.code {
-        case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost,
-             NSURLErrorNetworkConnectionLost, NSURLErrorDNSLookupFailed,
-             NSURLErrorNotConnectedToInternet, NSURLErrorTimedOut:
-            if let url = webView.url?.host {
-                domainFailureHandler?(url)
-            }
-        default:
-            break
-        }
     }
 
     private func syncCookiesToURLSession() {
@@ -594,22 +550,10 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
     
-    // Danh sách domain AVS quen thuộc, thử lần lượt nếu domain đã lưu fail.
-    // bit.ly là phương án cuối vì chậm và đôi khi rate-limit.
-    private let knownDomains = [
-        "https://animevietsub.pl",
-        "https://animevietsub.by",
-        "https://animevietsub.cx",
-        "https://animevietsub.lol",
-        "https://animevietsub.show"
-    ]
-
     func fetchHomeMovies(completion: @escaping ([Movie]) -> Void) {
-        // Cache 30 phút: cold launch hiện list ngay rồi refresh ngầm.
         if let cached: [Movie] = DiskCache.shared.get("home", ttl: 1800, as: [Movie].self), !cached.isEmpty {
             Logger.shared.log("[fetchHomeMovies] CACHE HIT (\(cached.count) phim) — trả ngay + refresh nền")
             completion(cached)
-            // Refresh ngầm để cập nhật cho lần load sau, không update UI.
             fetchHomePlusLatest { fresh in
                 if !fresh.isEmpty { DiskCache.shared.set(fresh, forKey: "home") }
             }
@@ -621,61 +565,40 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
 
-    /// Fetch home page + /phim-moi/ trang 1+2 tuần tự để không bị hủy request trên WKWebView chung.
-    private func fetchHomePlusLatest(completion: @escaping ([Movie]) -> Void) {
-        var homeMovies: [Movie] = []
-        var page1Movies: [Movie] = []
-        var page2Movies: [Movie] = []
-
-        tryHomeFromDomains([resolvedDomain] + knownDomains.filter { $0 != resolvedDomain }) { [weak self] movies in
-            homeMovies = movies
-            guard let self = self else { return }
-            
-            self.fetchHTML(url: "\(self.resolvedDomain)/phim-moi/page/1/") { html1 in
-                self.parseMovies(html: html1) { m1 in
-                    page1Movies = m1
-                    
-                    self.fetchHTML(url: "\(self.resolvedDomain)/phim-moi/page/2/") { html2 in
-                        self.parseMovies(html: html2) { m2 in
-                            page2Movies = m2
-                            
-                            var seen = Set<String>()
-                            var combined: [Movie] = []
-                            for m in homeMovies + page1Movies + page2Movies where seen.insert(m.link).inserted {
-                                combined.append(m)
-                            }
-                            Logger.shared.log("[Home] home=\(homeMovies.count) + page1=\(page1Movies.count) + page2=\(page2Movies.count) → \(combined.count) phim sau dedupe")
-                            completion(combined)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Lấy 1 trang /phim-moi/page/N/ (dùng cho infinite scroll).
     func fetchMoviesPage(_ page: Int, completion: @escaping ([Movie]) -> Void) {
         fetchHTML(url: "\(resolvedDomain)/phim-moi/page/\(page)/") { html in
             self.parseMovies(html: html, completion: completion)
         }
     }
 
-    private func tryHomeFromDomains(_ domains: [String], completion: @escaping ([Movie]) -> Void) {
-        guard let first = domains.first else {
-            // Cạn danh sách → fallback cuối qua bit.ly
-            Logger.shared.log("[fetchHomeMovies] Tất cả domain known đều fail, thử bit.ly")
-            fetchHTML(url: backupUrl) { html in
-                self.parseMovies(html: html, completion: completion)
-            }
-            return
-        }
-        Logger.shared.log("[fetchHomeMovies] Thử domain: \(first)")
-        fetchHTML(url: first) { html in
-            self.parseMovies(html: html) { movies in
-                if movies.isEmpty {
-                    self.tryHomeFromDomains(Array(domains.dropFirst()), completion: completion)
-                } else {
-                    completion(movies)
+    private func fetchHomePlusLatest(completion: @escaping ([Movie]) -> Void) {
+        var homeMovies: [Movie] = []
+        var page1Movies: [Movie] = []
+        var page2Movies: [Movie] = []
+
+        fetchHTML(url: resolvedDomain) { [weak self] html in
+            self?.parseMovies(html: html) { movies in
+                homeMovies = movies
+                guard let self = self else { return }
+                
+                self.fetchHTML(url: "\(self.resolvedDomain)/phim-moi/page/1/") { html1 in
+                    self.parseMovies(html: html1) { m1 in
+                        page1Movies = m1
+                        
+                        self.fetchHTML(url: "\(self.resolvedDomain)/phim-moi/page/2/") { html2 in
+                            self.parseMovies(html: html2) { m2 in
+                                page2Movies = m2
+                                
+                                var seen = Set<String>()
+                                var combined: [Movie] = []
+                                for m in homeMovies + page1Movies + page2Movies where seen.insert(m.link).inserted {
+                                    combined.append(m)
+                                }
+                                Logger.shared.log("[Home] home=\(homeMovies.count) + page1=\(page1Movies.count) + page2=\(page2Movies.count) → \(combined.count) phim sau dedupe")
+                                completion(combined)
+                            }
+                        }
+                    }
                 }
             }
         }

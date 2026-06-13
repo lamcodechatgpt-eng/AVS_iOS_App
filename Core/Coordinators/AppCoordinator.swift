@@ -34,43 +34,6 @@ final class AppCoordinator: Coordinator {
 
         window.rootViewController = navigationController
         window.makeKeyAndVisible()
-
-        NetworkManager.shared.domainFailureHandler = { [weak self] failedHost in
-            self?.promptNewDomain(failedHost: failedHost)
-        }
-    }
-
-    private func promptNewDomain(failedHost: String) {
-        guard let top = UIViewController.topMost else { return }
-        let alert = UIAlertController(
-            title: "Domain không hoạt động",
-            message: "\(failedHost) không truy cập được.\nNhập link mới (vd: https://animevietsub.pl):",
-            preferredStyle: .alert
-        )
-        alert.addTextField { tf in
-            tf.placeholder = "https://animevietsub.pl"
-            tf.keyboardType = .URL
-            tf.text = NetworkManager.shared.resolvedDomain
-        }
-        alert.addAction(UIAlertAction(title: "Để sau", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Lưu & thử lại", style: .default) { _ in
-            guard let text = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !text.isEmpty else { return }
-            NetworkManager.shared.resolvedDomain = text
-        })
-        top.present(alert, animated: true)
-    }
-}
-
-extension UIViewController {
-    static var topMost: UIViewController? {
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let root = scene.windows.first?.rootViewController else { return nil }
-        var top = root
-        while let presented = top.presentedViewController {
-            top = presented
-        }
-        return top
     }
 }
 

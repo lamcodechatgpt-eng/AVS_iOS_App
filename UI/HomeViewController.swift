@@ -238,9 +238,30 @@ final class HomeViewController: UIViewController {
     // MARK: - Navigation
     private func setupNavigationItems() {
         navigationItem.rightBarButtonItems = [
+            UIBarButtonItem(image: UIImage(systemName: "gearshape"), style: .plain, target: self, action: #selector(openDomainSettings)),
             UIBarButtonItem(image: UIImage(systemName: "square.grid.2x2"), style: .plain, target: self, action: #selector(openGenrePicker)),
             UIBarButtonItem(image: UIImage(systemName: "shuffle"), style: .plain, target: self, action: #selector(openRandom))
         ]
+    }
+
+    @objc private func openDomainSettings() {
+        let alert = UIAlertController(
+            title: "Domain",
+            message: "Nhập link animevietsub mới:",
+            preferredStyle: .alert
+        )
+        alert.addTextField { tf in
+            tf.placeholder = "https://animevietsub.pl"
+            tf.keyboardType = .URL
+            tf.text = NetworkManager.shared.resolvedDomain
+        }
+        alert.addAction(UIAlertAction(title: "Huỷ", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Lưu", style: .default) { _ in
+            guard let text = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty else { return }
+            NetworkManager.shared.resolvedDomain = text
+        })
+        present(alert, animated: true)
     }
 
     @objc private func openRandom() {
