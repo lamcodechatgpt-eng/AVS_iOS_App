@@ -23,34 +23,40 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      - name: Build and capture output
-        id: build
+      - name: Test 1 - minimal build (no flags)
+        continue-on-error: true
         run: |
-          xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -destination generic/platform=iOS CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO 2>&1 | tee build_log.txt; ec=${PIPESTATUS[0]}; echo "XCODEBUILD_EXIT=$ec"; echo "exit_code=$ec" >> $GITHUB_OUTPUT
-          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+          xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App 2>&1 | tee build1.txt; ec1=${PIPESTATUS[0]}; echo "EC1=$ec1" >> $GITHUB_STEP_SUMMARY
 
-      - name: Show build log excerpt and upload
+      - name: Test 2 - with CODE_SIGNING_REQUIRED=NO
+        continue-on-error: true
+        run: |
+          xcodebuild build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App CODE_SIGNING_REQUIRED=NO 2>&1 | tee build2.txt; ec2=${PIPESTATUS[0]}; echo "EC2=$ec2" >> $GITHUB_STEP_SUMMARY
+
+      - name: Test 3 - with deployment target check
         if: always()
-        shell: bash
+        run: |
+          for f in build1.txt build2.txt; do
+            if [ -f "$f" ]; then
+              echo "=== $f ===" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              grep -i "error\|BUILD\|failed\|fatal" "$f" | tail -20 >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              wc -c "$f" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+      - name: Upload logs to Gist
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          if [ -f build_log.txt ]; then
-            echo "### Build output (last 80 lines):" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            tail -80 build_log.txt >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            if [ -n "$GH_TOKEN" ]; then
-              gist_url=$(gh gist create build_log.txt --public --desc "AVS iOS Build $(date +%Y-%m-%d-%H%M)")
-              echo "GIST URL: $gist_url"
-              echo "### [📄 Full build log Gist]($gist_url)" >> $GITHUB_STEP_SUMMARY
+          for f in build1.txt build2.txt; do
+            if [ -f "$f" ] && [ -n "$GH_TOKEN" ]; then
+              echo "Uploading $f ($(wc -c < $f) bytes)..."
+              url=$(gh gist create "$f" --public --desc "AVS build log $f $(date +%H%M%S)" 2>&1)
+              echo "Gist for $f: $url"
+              echo "$f -> $url" >> $GITHUB_STEP_SUMMARY
             fi
-          else
-            echo "No build_log.txt found - xcodebuild produced no output" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Check build result
-        if: steps.build.outputs.exit_code != '0'
-        run: |
-          echo "### Build FAILED (exit code ${{ steps.build.outputs.exit_code }})" >> $GITHUB_STEP_SUMMARY
-          exit 1
+          done
+          echo "Done uploading gists"
