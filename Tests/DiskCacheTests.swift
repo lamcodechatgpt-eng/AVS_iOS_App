@@ -11,6 +11,9 @@ final class DiskCacheTests: XCTestCase {
 
         cache.set(["value"], forKey: "expired")
         currentTime = 200
+        let stale: (value: [String], age: TimeInterval)? = cache.getWithAge("expired", as: [String].self)
+        XCTAssertEqual(stale?.value, ["value"])
+        XCTAssertEqual(stale?.age, 100)
         XCTAssertNil(cache.get("expired", ttl: 10, as: [String].self))
         XCTAssertNil(defaults.data(forKey: "cache.expired"))
 

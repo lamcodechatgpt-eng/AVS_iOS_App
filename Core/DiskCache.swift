@@ -27,13 +27,24 @@ final class DiskCache {
     }
 
     func get<T: Decodable>(_ key: String, ttl: TimeInterval, as type: T.Type) -> T? {
+        guard let cached: (value: T, age: TimeInterval) = getWithAge(key, as: type) else { return nil }
+        if cached.age > max(0, ttl) {
+            remove(key)
+            return nil
+        }
+        return cached.value
+    }
+
+    /// Returns a valid cached payload together with its age without applying TTL.
+    /// Useful for stale-while-refresh UIs that can render old data immediately.
+    func getWithAge<T: Decodable>(_ key: String, as type: T.Type) -> (value: T, age: TimeInterval)? {
         guard let raw = defaults.data(forKey: "cache.\(key)") else { return nil }
         guard let entry = try? JSONDecoder().decode(Entry.self, from: raw) else {
             remove(key)
             return nil
         }
         let age = now() - entry.savedAt
-        if age < 0 || age > max(0, ttl) {
+        if age < 0 {
             remove(key)
             return nil
         }
@@ -41,7 +52,7 @@ final class DiskCache {
             remove(key)
             return nil
         }
-        return value
+        return (value, age)
     }
 
     func remove(_ key: String) {

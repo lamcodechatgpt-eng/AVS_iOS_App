@@ -468,6 +468,86 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
 
+    static func isUsableListingHTML(_ html: String, statusCode: Int) -> Bool {
+        guard statusCode == 200 else { return false }
+        let lower = html.lowercased()
+        let isChallenge = lower.contains("cf-chl-")
+            || lower.contains("just a moment")
+            || lower.contains("checking your browser")
+        let hasListingContent = lower.contains("/phim/")
+            || lower.contains("tpost")
+            || lower.contains("ml-item")
+        return !isChallenge && hasListingContent
+    }
+
+    /// Fast path for list pages. Reuses WKWebView cookies but avoids the DOM polling
+    /// cost when Cloudflare already trusts the current session. A challenge/403 is
+    /// reported as nil so callers can transparently fall back to `fetchHTML`.
+    private func fetchDirectListingHTML(url: URL, completion: @escaping (String?) -> Void) {
+        let startedAt = Date()
+        webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+            let host = url.host?.lowercased() ?? ""
+            let matchingCookies = cookies.filter { cookie in
+                let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                let hostMatches = host == domain || host.hasSuffix(".\(domain)")
+                let pathMatches = url.path.isEmpty || url.path.hasPrefix(cookie.path)
+                let securityMatches = !cookie.isSecure || url.scheme?.lowercased() == "https"
+                return hostMatches && pathMatches && securityMatches
+            }
+
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 4
+            request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                             forHTTPHeaderField: "Accept")
+            request.setValue("vi-VN,vi;q=0.9,en;q=0.7", forHTTPHeaderField: "Accept-Language")
+            var origin = URLComponents()
+            origin.scheme = url.scheme
+            origin.host = url.host
+            origin.port = url.port
+            request.setValue((origin.url?.absoluteString ?? self.resolvedDomain) + "/",
+                             forHTTPHeaderField: "Referer")
+            request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+                             forHTTPHeaderField: "User-Agent")
+            for (name, value) in HTTPCookie.requestHeaderFields(with: matchingCookies) {
+                request.setValue(value, forHTTPHeaderField: name)
+            }
+
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                let html = data.flatMap { String(data: $0, encoding: .utf8) }
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let accepted = error == nil
+                    && html.map { Self.isUsableListingHTML($0, statusCode: status) } == true
+                let elapsed = Int(Date().timeIntervalSince(startedAt) * 1_000)
+                Logger.shared.log("[DirectHTML] \(url.path.isEmpty ? "/" : url.path) HTTP \(status), accepted=\(accepted), \(elapsed)ms")
+                DispatchQueue.main.async { completion(accepted ? html : nil) }
+            }.resume()
+        }
+    }
+
+    private func fetchListingHTML(url: String, completion: @escaping (String) -> Void) {
+        let execute = { [weak self] in
+            guard let self = self, let target = URL(string: url) else { completion(""); return }
+            self.fetchDirectListingHTML(url: target) { [weak self] directHTML in
+                guard let self = self else { completion(""); return }
+                if let directHTML = directHTML {
+                    completion(directHTML)
+                } else {
+                    self.fetchHTML(url: url, completion: completion)
+                }
+            }
+        }
+        if Thread.isMainThread {
+            execute()
+        } else {
+            DispatchQueue.main.async(execute: execute)
+        }
+    }
+
+    static func combineHomeMovies(home: [Movie], page1: [Movie], page2: [Movie]) -> [Movie] {
+        var seen = Set<String>()
+        return (home + page1 + page2).filter { seen.insert($0.link).inserted }
+    }
+
     /// Live search suggestion qua AJAX endpoint `/ajax/suggest`.
     /// Trả tối đa 5-6 phim trong < 500ms (URLSession trực tiếp, không qua WebView).
     func fetchSearchSuggestions(keyword: String, completion: @escaping ([Movie]) -> Void) {
@@ -744,52 +824,76 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
     
     func fetchHomeMovies(completion: @escaping ([Movie]) -> Void) {
-        if let cached: [Movie] = DiskCache.shared.get("home", ttl: 1800, as: [Movie].self), !cached.isEmpty {
-            Logger.shared.log("[fetchHomeMovies] CACHE HIT (\(cached.count) phim)")
-            completion(cached)
-            return
+        var deliveredMovies: [Movie]?
+        if let cached: (value: [Movie], age: TimeInterval) = DiskCache.shared.getWithAge("home", as: [Movie].self),
+           !cached.value.isEmpty {
+            if cached.age <= 1_800 {
+                Logger.shared.log("[fetchHomeMovies] CACHE HIT (\(cached.value.count) phim, \(Int(cached.age))s)")
+                completion(cached.value)
+                return
+            }
+            if cached.age <= 7 * 86_400 {
+                Logger.shared.log("[fetchHomeMovies] STALE CACHE (\(cached.value.count) phim, \(Int(cached.age))s) — hiển thị trong lúc refresh")
+                deliveredMovies = cached.value
+                completion(cached.value)
+            } else {
+                DiskCache.shared.remove("home")
+            }
         }
-        fetchHomePlusLatest { movies in
-            if !movies.isEmpty { DiskCache.shared.set(movies, forKey: "home") }
-            completion(movies)
+        let requestedDomain = resolvedDomain
+        fetchHomePlusLatest(domain: requestedDomain, onInitial: { movies in
+            if deliveredMovies != movies {
+                deliveredMovies = movies
+                completion(movies)
+            }
+        }) { movies in
+            if !movies.isEmpty, self.resolvedDomain == requestedDomain {
+                DiskCache.shared.set(movies, forKey: "home")
+            }
+            if !movies.isEmpty, deliveredMovies != movies {
+                deliveredMovies = movies
+                completion(movies)
+            } else if deliveredMovies == nil {
+                completion([])
+            }
         }
     }
 
     func fetchMoviesPage(_ page: Int, completion: @escaping ([Movie]) -> Void) {
-        fetchHTML(url: "\(resolvedDomain)/phim-moi/page/\(page)/") { html in
+        fetchListingHTML(url: "\(resolvedDomain)/phim-moi/page/\(page)/") { html in
             self.parseMovies(html: html, completion: completion)
         }
     }
 
-    private func fetchHomePlusLatest(completion: @escaping ([Movie]) -> Void) {
-        var homeMovies: [Movie] = []
-        var page1Movies: [Movie] = []
-        var page2Movies: [Movie] = []
-
-        fetchHTML(url: resolvedDomain) { [weak self] html in
+    private func fetchHomePlusLatest(domain: String,
+                                     onInitial: @escaping ([Movie]) -> Void,
+                                     completion: @escaping ([Movie]) -> Void) {
+        let startedAt = Date()
+        fetchListingHTML(url: domain) { [weak self] html in
             let genres = Self.parseGenres(from: html)
             if !genres.isEmpty { DiskCache.shared.set(genres, forKey: "genres") }
             self?.parseMovies(html: html) { movies in
-                homeMovies = movies
-                guard let self = self else { return }
-                
-                self.fetchHTML(url: "\(self.resolvedDomain)/phim-moi/page/1/") { html1 in
-                    self.parseMovies(html: html1) { m1 in
-                        page1Movies = m1
-                        
-                        self.fetchHTML(url: "\(self.resolvedDomain)/phim-moi/page/2/") { html2 in
-                            self.parseMovies(html: html2) { m2 in
-                                page2Movies = m2
-                                
-                                var seen = Set<String>()
-                                var combined: [Movie] = []
-                                for m in homeMovies + page1Movies + page2Movies where seen.insert(m.link).inserted {
-                                    combined.append(m)
-                                }
-                                Logger.shared.log("[Home] home=\(homeMovies.count) + page1=\(page1Movies.count) + page2=\(page2Movies.count) → \(combined.count) phim sau dedupe")
-                                completion(combined)
-                            }
-                        }
+                guard let self = self else { completion(movies); return }
+                if !movies.isEmpty { onInitial(movies) }
+
+                var pages: [Int: [Movie]] = [:]
+                var remaining = 2
+                func finish(page: Int, movies pageMovies: [Movie]) {
+                    pages[page] = pageMovies
+                    remaining -= 1
+                    guard remaining == 0 else { return }
+
+                    let combined = Self.combineHomeMovies(home: movies,
+                                                          page1: pages[1] ?? [],
+                                                          page2: pages[2] ?? [])
+                    let elapsed = Int(Date().timeIntervalSince(startedAt) * 1_000)
+                    Logger.shared.log("[Home] progressive home=\(movies.count), page1=\(pages[1]?.count ?? 0), page2=\(pages[2]?.count ?? 0) → \(combined.count) phim, \(elapsed)ms")
+                    completion(combined)
+                }
+
+                for page in 1...2 {
+                    self.fetchListingHTML(url: "\(domain)/phim-moi/page/\(page)/") { pageHTML in
+                        self.parseMovies(html: pageHTML) { finish(page: page, movies: $0) }
                     }
                 }
             }

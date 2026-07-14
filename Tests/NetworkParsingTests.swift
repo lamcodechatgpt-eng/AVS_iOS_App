@@ -2,6 +2,33 @@ import XCTest
 @testable import AVS_iOS_App
 
 final class NetworkParsingTests: XCTestCase {
+    func testHomeCombinationKeepsOrderAndRemovesDuplicates() {
+        let home = Movie(title: "Home", link: "https://example.test/phim/home", thumbUrl: "", episodeStatus: "")
+        let first = Movie(title: "Page 1", link: "https://example.test/phim/page-1", thumbUrl: "", episodeStatus: "")
+        let duplicate = Movie(title: "Duplicate title", link: home.link, thumbUrl: "other", episodeStatus: "")
+        let second = Movie(title: "Page 2", link: "https://example.test/phim/page-2", thumbUrl: "", episodeStatus: "")
+
+        let result = NetworkManager.combineHomeMovies(home: [home], page1: [first, duplicate], page2: [second])
+
+        XCTAssertEqual(result.map(\.link), [home.link, first.link, second.link])
+        XCTAssertEqual(result.first?.title, "Home")
+    }
+
+    func testDirectListingValidationRejectsChallengesAndNonSuccessResponses() {
+        XCTAssertTrue(NetworkManager.isUsableListingHTML(
+            #"<article class="TPost"><a href="/phim/anime/">Anime</a></article>"#,
+            statusCode: 200
+        ))
+        XCTAssertFalse(NetworkManager.isUsableListingHTML(
+            #"<title>Just a moment...</title><div class="cf-chl-managed"><a href="/phim/fake/">Wait</a></div>"#,
+            statusCode: 200
+        ))
+        XCTAssertFalse(NetworkManager.isUsableListingHTML(
+            #"<a href="/phim/anime/">Anime</a>"#,
+            statusCode: 403
+        ))
+    }
+
     func testHomeItemsKeepStableIdentityWithinEachSection() {
         let movie = Movie(title: "Anime", link: "https://example.test/phim/anime", thumbUrl: "", episodeStatus: "")
         XCTAssertEqual(HomeItem(movie: movie, progress: 0.2, namespace: "grid"),

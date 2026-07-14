@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -26,18 +26,19 @@ jobs:
       - name: Run unit tests
         run: |
           SIMULATOR_ID=$(xcrun simctl list devices available | grep -m1 'iPhone' | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+          SIMULATOR_ARCH=$(uname -m)
           test -n "$SIMULATOR_ID"
           xcodebuild test \
             -project AVS_iOS_App.xcodeproj \
             -scheme AVS_iOS_App \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID,arch=$SIMULATOR_ARCH" \
             -derivedDataPath "$PWD/build-tests" \
             -resultBundlePath "$PWD/TestResults.xcresult" \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Upload test diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: AVS-iOS-TestResults
           path: TestResults.xcresult
@@ -52,7 +53,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent Payload AVS_iOS_App.ipa
 
       - name: Upload IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: AVS_iOS_App-IPA
           path: AVS_iOS_App.ipa
