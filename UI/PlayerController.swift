@@ -2,6 +2,12 @@ import UIKit
 import AVKit
 
 class PlayerController: UIViewController {
+    static func isExitTransition(movingFromParent: Bool,
+                                 beingDismissed: Bool,
+                                 navigationBeingDismissed: Bool) -> Bool {
+        movingFromParent || beingDismissed || navigationBeingDismissed
+    }
+
     var episodeUrl: String?
     var episodes: [Episode] = []
     var currentIndex: Int = 0
@@ -33,6 +39,7 @@ class PlayerController: UIViewController {
     private weak var currentPlayerItem: AVPlayerItem?
     private var resolveGeneration = 0
     private var preferredPlaybackRate: Float = 1.0
+    private var pendingExit = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -52,10 +59,41 @@ class PlayerController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         persistCurrentPosition()
-        let isLeavingPlayer = isMovingFromParent || navigationController?.isBeingDismissed == true
-        if isLeavingPlayer, let token = periodicTimeToken {
-            currentPlayer?.removeTimeObserver(token)
-            periodicTimeToken = nil
+        pendingExit = Self.isExitTransition(
+            movingFromParent: isMovingFromParent,
+            beingDismissed: isBeingDismissed,
+            navigationBeingDismissed: navigationController?.isBeingDismissed == true
+        )
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // An interactive back gesture can call viewWillDisappear and then be
+        // cancelled. In that case the player remains active and must keep all of
+        // its observers; only a completed disappearance is considered an exit.
+        pendingExit = false
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        guard pendingExit else { return }
+        resolveGeneration += 1
+        phaseTimer?.invalidate()
+        phaseTimer = nil
+        tearDownAttachedPlayer()
+        pendingExit = false
+    }
+
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        // Defensive fallback for non-animated or custom-container removals where
+        // the usual appearance callbacks may not report an exit transition.
+        if parent == nil, isViewLoaded {
+            resolveGeneration += 1
+            phaseTimer?.invalidate()
+            phaseTimer = nil
+            tearDownAttachedPlayer()
+            pendingExit = false
         }
     }
 
