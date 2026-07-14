@@ -26,6 +26,17 @@ final class NetworkParsingTests: XCTestCase {
         XCTAssertEqual(result.first?.title, "Home")
     }
 
+    func testGenreCombinationPreservesSelectionOrderAndDeduplicatesMovies() {
+        let action = Movie(title: "Action", link: "/phim/action", thumbUrl: "", episodeStatus: "")
+        let comedy = Movie(title: "Comedy", link: "/phim/comedy", thumbUrl: "", episodeStatus: "")
+        let duplicate = Movie(title: "Duplicate", link: action.link, thumbUrl: "other", episodeStatus: "")
+
+        let result = HomeViewController.combineGenreMovies([[action], [comedy, duplicate]])
+
+        XCTAssertEqual(result.map(\.link), [action.link, comedy.link])
+        XCTAssertEqual(result.first?.title, "Action")
+    }
+
     func testDirectListingValidationRejectsChallengesAndNonSuccessResponses() {
         XCTAssertTrue(NetworkManager.isUsableListingHTML(
             #"<article class="TPost"><a href="/phim/anime/">Anime</a></article>"#,

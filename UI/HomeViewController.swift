@@ -27,6 +27,10 @@ struct HomeItem: Hashable {
 }
 
 final class HomeViewController: UIViewController {
+    static func combineGenreMovies(_ groups: [[Movie]]) -> [Movie] {
+        var seen = Set<String>()
+        return groups.flatMap { $0 }.filter { seen.insert($0.link).inserted }
+    }
 
     // MARK: - Coordinator
     weak var coordinator: HomeCoordinator?
@@ -360,32 +364,38 @@ final class HomeViewController: UIViewController {
         spinner.startAnimating()
         collectionView.isHidden = true
 
-        var allMovies: [Movie] = []
-        var remaining = genres.map(\.slug)
-        func next() {
-            guard self.dataGeneration == generation else { return }
-            guard !remaining.isEmpty else {
-                var seen = Set<String>()
-                self.movies = allMovies.filter { seen.insert($0.link).inserted }
-                self.heroMovies = Array(self.movies.prefix(5))
-                self.spinner.stopAnimating()
-                self.collectionView.isHidden = false
-                self.applySnapshot()
-                self.showEmptyState(self.movies.isEmpty ? "Không tìm thấy phim thuộc các thể loại đã chọn." : nil)
-                return
-            }
-            let slug = remaining.removeFirst()
-            let url = "\(NetworkManager.shared.resolvedDomain)/the-loai/\(slug)/"
-            NetworkManager.shared.fetchHTML(url: url) { html in
-                guard self.dataGeneration == generation else { return }
-                NetworkManager.shared.parseMovies(html: html) { fetched in
-                    guard self.dataGeneration == generation else { return }
-                    allMovies.append(contentsOf: fetched)
-                    next()
+        let requestedDomain = NetworkManager.shared.resolvedDomain
+        var results = Array(repeating: [Movie](), count: genres.count)
+        var remaining = genres.count
+
+        for (index, genre) in genres.enumerated() {
+            let url = "\(requestedDomain)/the-loai/\(genre.slug)/"
+            NetworkManager.shared.fetchHTML(
+                url: url,
+                isCancelled: { [weak self] in
+                    guard let self = self else { return true }
+                    return self.dataGeneration != generation
+                        || NetworkManager.shared.resolvedDomain != requestedDomain
+                }
+            ) { [weak self] html in
+                guard let self = self,
+                      self.dataGeneration == generation,
+                      NetworkManager.shared.resolvedDomain == requestedDomain else { return }
+                NetworkManager.shared.parseMovies(html: html) { [weak self] fetched in
+                    guard let self = self, self.dataGeneration == generation else { return }
+                    results[index] = fetched
+                    remaining -= 1
+                    guard remaining == 0 else { return }
+
+                    self.movies = Self.combineGenreMovies(results)
+                    self.heroMovies = Array(self.movies.prefix(5))
+                    self.spinner.stopAnimating()
+                    self.collectionView.isHidden = false
+                    self.applySnapshot()
+                    self.showEmptyState(self.movies.isEmpty ? "Không tìm thấy phim thuộc các thể loại đã chọn." : nil)
                 }
             }
         }
-        next()
     }
 
     // MARK: - Search
@@ -543,11 +553,21 @@ extension HomeViewController: UISearchBarDelegate, UISearchResultsUpdating {
         showEmptyState(nil)
         spinner.startAnimating()
         collectionView.isHidden = true
-        let url = "\(NetworkManager.shared.resolvedDomain)/tim-kiem/\(keyword)/"
-        NetworkManager.shared.fetchHTML(url: url) { html in
-            guard self.dataGeneration == generation else { return }
-            NetworkManager.shared.parseMovies(html: html) { fetched in
-                guard self.dataGeneration == generation else { return }
+        let requestedDomain = NetworkManager.shared.resolvedDomain
+        let url = "\(requestedDomain)/tim-kiem/\(keyword)/"
+        NetworkManager.shared.fetchHTML(
+            url: url,
+            isCancelled: { [weak self] in
+                guard let self = self else { return true }
+                return self.dataGeneration != generation
+                    || NetworkManager.shared.resolvedDomain != requestedDomain
+            }
+        ) { [weak self] html in
+            guard let self = self,
+                  self.dataGeneration == generation,
+                  NetworkManager.shared.resolvedDomain == requestedDomain else { return }
+            NetworkManager.shared.parseMovies(html: html) { [weak self] fetched in
+                guard let self = self, self.dataGeneration == generation else { return }
                 self.movies = fetched
                 self.heroMovies = Array(fetched.prefix(5))
                 self.spinner.stopAnimating()
