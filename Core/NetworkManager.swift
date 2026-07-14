@@ -339,6 +339,17 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                    isCancelled: @escaping () -> Bool = { false },
                    completion: @escaping (String) -> Void) {
         let enqueue = {
+            // Purge obsolete queued work even while another navigation is active.
+            // This gives cancelled callers an immediate terminal callback instead
+            // of making them wait for the shared WebView to become idle.
+            let cancelledRequests = self.htmlRequestQueue.filter { $0.isCancelled() }
+            self.htmlRequestQueue.removeAll { $0.isCancelled() }
+            cancelledRequests.forEach { $0.completion("") }
+            guard !isCancelled() else {
+                completion("")
+                return
+            }
+
             let request = HTMLRequest(url: url,
                                       waitForIframe: waitForIframe,
                                       isCancelled: isCancelled,
