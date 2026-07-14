@@ -31,7 +31,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         tabAppearance.stackedLayoutAppearance.selected.iconColor = .accent
         tabAppearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor.accent, .font: UIFont.systemFont(ofSize: 11, weight: .semibold)]
         UITabBar.appearance().standardAppearance = tabAppearance
-        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+        if #available(iOS 15.0, *) {
+            UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+        }
 
         let coordinator = AppCoordinator(window: window)
         self.appCoordinator = coordinator

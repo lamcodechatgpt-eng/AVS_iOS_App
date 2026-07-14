@@ -9,6 +9,8 @@ final class ImageLoader {
 
     private let memory = NSCache<NSString, UIImage>()
     private let session: URLSession
+    private var activeTasks: [ObjectIdentifier: URLSessionDataTask] = [:]
+    private var activeTokens: [ObjectIdentifier: UUID] = [:]
 
     private init() {
         memory.countLimit = 300
@@ -23,25 +25,40 @@ final class ImageLoader {
 
     @discardableResult
     func load(_ url: URL, into imageView: UIImageView, placeholder: UIImage? = nil) -> URLSessionDataTask? {
+        dispatchPrecondition(condition: .onQueue(.main))
         let key = url.absoluteString as NSString
+        let identifier = ObjectIdentifier(imageView)
+        cancelLoad(for: imageView)
         if let cached = memory.object(forKey: key) {
             imageView.image = cached
             return nil
         }
         imageView.image = placeholder
-        imageView.tag = key.hashValue
+        let token = UUID()
+        activeTokens[identifier] = token
         let task = session.dataTask(with: url) { [weak self, weak imageView] data, _, _ in
-            guard let data = data, let img = UIImage(data: data) else { return }
-            self?.memory.setObject(img, forKey: key)
+            let image = data.flatMap { UIImage(data: $0) }
+            if let image = image { self?.memory.setObject(image, forKey: key) }
             DispatchQueue.main.async {
-                guard let iv = imageView, iv.tag == key.hashValue else { return }
+                guard let self = self, self.activeTokens[identifier] == token else { return }
+                self.activeTokens.removeValue(forKey: identifier)
+                self.activeTasks.removeValue(forKey: identifier)
+                guard let iv = imageView, let image = image else { return }
                 UIView.transition(with: iv, duration: 0.2, options: .transitionCrossDissolve, animations: {
-                    iv.image = img
+                    iv.image = image
                 })
             }
         }
+        activeTasks[identifier] = task
         task.resume()
         return task
+    }
+
+    func cancelLoad(for imageView: UIImageView) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let identifier = ObjectIdentifier(imageView)
+        activeTasks.removeValue(forKey: identifier)?.cancel()
+        activeTokens.removeValue(forKey: identifier)
     }
 
     func prefetch(_ urls: [URL]) {

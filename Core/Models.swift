@@ -7,9 +7,33 @@ struct Movie: Codable, Hashable {
     var episodeStatus: String
 }
 
+enum ContentIdentifier {
+    static func make(from link: String) -> String {
+        let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let components = URLComponents(string: trimmed), !components.path.isEmpty {
+            let path = components.path.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return path.isEmpty ? trimmed.lowercased() : path
+        }
+        return trimmed.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+}
+
+extension Movie {
+    var persistenceID: String { ContentIdentifier.make(from: link) }
+}
+
 struct Episode: Codable {
     var title: String
     var link: String
+}
+
+struct GenreOption: Codable, Hashable {
+    let name: String
+    let slug: String
+}
+
+extension Episode {
+    var persistenceID: String { ContentIdentifier.make(from: link) }
 }
 
 /// Thông tin chi tiết phim hiện ở MovieInfoVC. Tách khỏi Movie (list) để

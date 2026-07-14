@@ -28,6 +28,7 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
     private var movies: [Movie] = []
     private var historySubtitles: [Int: String] = [:]
     private let emptyLabel = UILabel()
+    private var lastLayoutWidth: CGFloat = 0
 
     private let bgView = BackgroundView()
 
@@ -44,12 +45,21 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
                 target: self,
                 action: #selector(clearAll)
             )
+            navigationItem.rightBarButtonItem?.accessibilityLabel = "Xóa toàn bộ lịch sử"
         }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         reload()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let width = collectionView.bounds.width
+        guard abs(width - lastLayoutWidth) > 0.5 else { return }
+        lastLayoutWidth = width
+        updateCollectionLayout(for: width)
     }
 
     private func setupBackground() {
@@ -67,12 +77,8 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
 
     private func setupCollection() {
         let layout = UICollectionViewFlowLayout()
-        let columns: CGFloat = 3
         let interItem: CGFloat = 10
         let sideInset: CGFloat = 12
-        let totalSpacing = sideInset * 2 + interItem * (columns - 1)
-        let cellWidth = (view.bounds.width - totalSpacing) / columns
-        layout.itemSize = CGSize(width: cellWidth, height: cellWidth * 1.5)
         layout.minimumLineSpacing = interItem
         layout.minimumInteritemSpacing = interItem
         layout.sectionInset = UIEdgeInsets(top: 12, left: sideInset, bottom: 12, right: sideInset)
@@ -85,6 +91,17 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
         collectionView.alwaysBounceVertical = true
         collectionView.register(MovieCell.self, forCellWithReuseIdentifier: "MovieCell")
         view.addSubview(collectionView)
+    }
+
+    private func updateCollectionLayout(for width: CGFloat) {
+        guard width > 0,
+              let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else { return }
+        let sideInset: CGFloat = 12
+        let spacing: CGFloat = 10
+        let columns = max(2, min(6, Int((width - sideInset * 2 + spacing) / 120)))
+        let cellWidth = (width - sideInset * 2 - spacing * CGFloat(columns - 1)) / CGFloat(columns)
+        layout.itemSize = CGSize(width: floor(cellWidth), height: floor(cellWidth * 1.5))
+        layout.invalidateLayout()
     }
 
     private func setupEmptyLabel() {
@@ -110,7 +127,7 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
             let entries = PlaybackStore.shared.history()
             movies = entries.map { $0.movie }
             for (idx, e) in entries.enumerated() {
-                historySubtitles[idx] = "▶ \(e.lastEpisodeTitle)"
+                historySubtitles[idx] = e.isCompleted == true ? "✓ Đã xem xong" : "▶ \(e.lastEpisodeTitle)"
             }
         case .favorites:
             movies = PlaybackStore.shared.favorites()

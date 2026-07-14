@@ -24,6 +24,11 @@ class MovieInfoViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        guard movie != nil else {
+            Logger.shared.log("[MovieInfo] Thiếu dữ liệu movie, đóng màn hình an toàn")
+            navigationController?.popViewController(animated: true)
+            return
+        }
         title = movie.title
 
         setupBackground()
@@ -39,6 +44,7 @@ class MovieInfoViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        guard movie != nil else { return }
         loadResumeIfAny()    // Quay lại từ player → refresh nút "Tiếp tục"
         refreshFavButton()
     }
@@ -49,6 +55,7 @@ class MovieInfoViewController: UIViewController {
                                       style: .plain,
                                       target: self,
                                       action: #selector(toggleFavorite))
+        barItem.accessibilityLabel = "Yêu thích"
         navigationItem.rightBarButtonItem = barItem
         refreshFavButton()
     }
@@ -248,9 +255,17 @@ class MovieInfoViewController: UIViewController {
         // Tìm tập gần nhất user đã xem từ HistoryEntry; nếu không có, check
         // positionMap cho từng episode trong danh sách.
         let history = PlaybackStore.shared.history()
-        if let h = history.first(where: { $0.movie.link == movie.link }),
-           h.lastEpisodeIndex < episodes.count {
-            resumeEpisodeIndex = h.lastEpisodeIndex
+        if let h = history.first(where: { $0.movie.persistenceID == movie.persistenceID && $0.isCompleted != true }) {
+            let matchedIndex = h.lastEpisodeURL.flatMap { url in
+                let identifier = ContentIdentifier.make(from: url)
+                return episodes.firstIndex(where: { $0.persistenceID == identifier })
+            }
+            guard let index = matchedIndex ?? (episodes.indices.contains(h.lastEpisodeIndex) ? h.lastEpisodeIndex : nil) else {
+                continueButton.isHidden = true
+                resumeEpisodeIndex = nil
+                return
+            }
+            resumeEpisodeIndex = index
             continueButton.setTitle("⏵ Tiếp tục \(h.lastEpisodeTitle)", for: .normal)
             continueButton.isHidden = false
             return
@@ -263,11 +278,11 @@ class MovieInfoViewController: UIViewController {
 
     @objc private func watchFromBeginning() {
         guard !episodes.isEmpty else { return }
-        openPlayer(at: 0)
+        openPlayer(at: 0, resume: false)
     }
 
     @objc private func continueWatching() {
-        guard let idx = resumeEpisodeIndex, idx < episodes.count else { return }
+        guard let idx = resumeEpisodeIndex, episodes.indices.contains(idx) else { return }
         openPlayer(at: idx)
     }
 
@@ -277,12 +292,17 @@ class MovieInfoViewController: UIViewController {
         navigationController?.pushViewController(listVC, animated: true)
     }
 
-    private func openPlayer(at index: Int) {
+    private func openPlayer(at index: Int, resume: Bool = true) {
+        guard episodes.indices.contains(index) else { return }
+        if !resume {
+            PlaybackStore.shared.clearPosition(for: episodes[index].link)
+        }
         let playerVC = PlayerController()
         playerVC.episodes = episodes
         playerVC.currentIndex = index
         playerVC.episodeUrl = episodes[index].link
         playerVC.movie = movie
+        playerVC.shouldResumePlayback = resume
         navigationController?.pushViewController(playerVC, animated: true)
     }
 }

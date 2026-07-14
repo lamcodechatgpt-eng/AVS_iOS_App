@@ -152,7 +152,9 @@ final class SuggestionCell: UITableViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        ImageLoader.shared.cancelLoad(for: poster)
         poster.image = nil
+        poster.tag = 0
         titleLabel.text = nil
         statusLabel.text = nil
     }

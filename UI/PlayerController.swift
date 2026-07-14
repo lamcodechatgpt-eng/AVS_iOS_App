@@ -6,6 +6,7 @@ class PlayerController: UIViewController {
     var episodes: [Episode] = []
     var currentIndex: Int = 0
     var movie: Movie?
+    var shouldResumePlayback = true
 
     private var periodicTimeToken: Any?
     private var resumeStatusObservation: NSKeyValueObservation?
@@ -30,6 +31,8 @@ class PlayerController: UIViewController {
     private var diagTimer: Timer?
     private var m3u8Loader: M3U8ResourceLoader?
     private weak var currentPlayerItem: AVPlayerItem?
+    private var resolveGeneration = 0
+    private var preferredPlaybackRate: Float = 1.0
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -48,10 +51,9 @@ class PlayerController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        guard let player = currentPlayer, let url = episodeUrl, !url.isEmpty else { return }
-        let secs = CMTimeGetSeconds(player.currentTime())
-        if secs.isFinite { PlaybackStore.shared.savePosition(secs, for: url) }
-        if let token = periodicTimeToken {
+        persistCurrentPosition()
+        let isLeavingPlayer = isMovingFromParent || navigationController?.isBeingDismissed == true
+        if isLeavingPlayer, let token = periodicTimeToken {
             currentPlayer?.removeTimeObserver(token)
             periodicTimeToken = nil
         }
@@ -61,6 +63,8 @@ class PlayerController: UIViewController {
         phaseTimer?.invalidate()
         diagTimer?.invalidate()
         statusObservation?.invalidate()
+        resumeStatusObservation?.invalidate()
+        if let token = periodicTimeToken { currentPlayer?.removeTimeObserver(token) }
         if let o = errorObserver { NotificationCenter.default.removeObserver(o) }
         if let o = stallObserver { NotificationCenter.default.removeObserver(o) }
         if let o = accessLogObserver { NotificationCenter.default.removeObserver(o) }
@@ -72,14 +76,37 @@ class PlayerController: UIViewController {
     private var resolveStartTime: Date?
     private var phaseTimer: Timer?
 
+    private func persistCurrentPosition(for url: String? = nil,
+                                        clearWhenNearStart: Bool = true) {
+        guard let player = currentPlayer,
+              let episodeURL = url ?? episodeUrl,
+              !episodeURL.isEmpty else { return }
+        let seconds = CMTimeGetSeconds(player.currentTime())
+        guard seconds.isFinite else { return }
+        if clearWhenNearStart && seconds <= 5 {
+            PlaybackStore.shared.clearPosition(for: episodeURL)
+            return
+        }
+        let duration = CMTimeGetSeconds(player.currentItem?.duration ?? .invalid)
+        PlaybackStore.shared.savePosition(seconds,
+                                          duration: duration.isFinite ? duration : nil,
+                                          for: episodeURL)
+    }
+
     private func updateEpisodeInfo() {
-        guard currentIndex < episodes.count else { return }
+        guard episodes.indices.contains(currentIndex) else {
+            episodeNumberLabel.text = ""
+            episodeTitleLabel.text = ""
+            return
+        }
         episodeNumberLabel.text = "Tập \(currentIndex + 1)"
         episodeTitleLabel.text = episodes[currentIndex].title
         navigationItem.title = episodes[currentIndex].title
     }
 
     private func startResolve() {
+        resolveGeneration += 1
+        let generation = resolveGeneration
         updateEpisodeInfo()
         activityIndicator.startAnimating()
         statusLabel.text = "Đang tải trang xem phim..."
@@ -102,21 +129,32 @@ class PlayerController: UIViewController {
             }
         }
 
-        guard let episodeUrl = episodeUrl else {
+        guard let episodeUrl = episodeUrl, !episodeUrl.isEmpty else {
+            phaseTimer?.invalidate()
+            phaseTimer = nil
+            activityIndicator.stopAnimating()
+            Logger.shared.log("[PlayerController] episodeUrl trống")
             self.showFailure()
-            Logger.shared.log("[PlayerController] episodeUrl = nil")
             return
         }
-        Extractor.resolveStream(episodeUrl: episodeUrl) { [weak self] stream in
+        Extractor.resolveStream(episodeUrl: episodeUrl, isCancelled: { [weak self] in
+            guard let self = self else { return true }
+            return generation != self.resolveGeneration || episodeUrl != self.episodeUrl
+        }) { [weak self] stream in
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                guard let self = self,
+                      generation == self.resolveGeneration,
+                      episodeUrl == self.episodeUrl else {
+                    Logger.shared.log("[PlayerController] Bỏ callback luồng cũ của \(episodeUrl)")
+                    return
+                }
                 self.phaseTimer?.invalidate()
                 self.phaseTimer = nil
                 self.activityIndicator.stopAnimating()
 
                 guard let stream = stream else {
-                    self.showFailure()
                     Logger.shared.log("[PlayerController] resolveStream trả về nil cho \(episodeUrl)")
+                    self.showFailure()
                     return
                 }
 
@@ -162,6 +200,12 @@ class PlayerController: UIViewController {
     }
 
     private func attachPlayer(for stream: Stream) {
+        let origin = stream.referer.hasSuffix("/") ? String(stream.referer.dropLast()) : stream.referer
+        let headers: [String: String] = [
+            "Referer": stream.referer,
+            "Origin": origin,
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+        ]
         let asset: AVURLAsset
         if let playlistData = stream.inlinePlaylist {
             // Phục vụ m3u8 từ memory qua AVAssetResourceLoaderDelegate. AVPlayer
@@ -169,7 +213,8 @@ class PlayerController: UIViewController {
             // playlist với Content-Type "application/vnd.apple.mpegurl" rõ ràng nên
             // chắc chắn được parse như HLS. Segments trong playlist là HTTPS tuyệt đối
             // → AVPlayer fetch trực tiếp.
-            asset = AVURLAsset(url: M3U8ResourceLoader.makePlaceholderURL(), options: nil)
+            asset = AVURLAsset(url: M3U8ResourceLoader.makePlaceholderURL(),
+                               options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
             let loader = M3U8ResourceLoader(payload: playlistData)
             m3u8Loader = loader
             asset.resourceLoader.setDelegate(loader, queue: .main)
@@ -178,11 +223,6 @@ class PlayerController: UIViewController {
             asset = AVURLAsset(url: stream.url, options: nil)
             Logger.shared.log("[PlayerController] Local file URL — không gắn HTTP headers")
         } else {
-            let headers: [String: String] = [
-                "Referer": stream.referer,
-                "Origin": String(stream.referer.dropLast()),
-                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
-            ]
             asset = AVURLAsset(url: stream.url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         }
         let item = AVPlayerItem(asset: asset)
@@ -213,9 +253,10 @@ class PlayerController: UIViewController {
             forName: .AVPlayerItemFailedToPlayToEndTime,
             object: item,
             queue: .main
-        ) { note in
+        ) { [weak self] note in
             let err = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
             Logger.shared.log("[PlayerController] FailedToPlayToEndTime: \(err?.localizedDescription ?? "?")")
+            self?.showFailure()
         }
 
         stallObserver = NotificationCenter.default.addObserver(
@@ -255,7 +296,7 @@ class PlayerController: UIViewController {
             object: item,
             queue: .main
         ) { [weak self] _ in
-            self?.playNextEpisodeIfAvailable()
+            self?.playNextEpisodeIfAvailable(markCurrentCompleted: true)
         }
 
         // Dump state mỗi 2s trong 12s đầu — không cần KVO trên mỗi property riêng.
@@ -273,6 +314,7 @@ class PlayerController: UIViewController {
         }
 
         let player = AVPlayer(playerItem: item)
+        player.defaultRate = preferredPlaybackRate
         let playerVC = AVPlayerViewController()
         playerVC.player = player
         playerVC.allowsPictureInPicturePlayback = true
@@ -297,17 +339,21 @@ class PlayerController: UIViewController {
 
         // Seek-to-resume khi user quay lại tập đang xem dở.
         // Quan sát readyToPlay rồi seek (không seek trước khi item ready).
-        let savedPosition = PlaybackStore.shared.position(for: episodeUrl ?? "")
+        let savedPosition = shouldResumePlayback ? PlaybackStore.shared.position(for: episodeUrl ?? "") : nil
+        shouldResumePlayback = true
         if let pos = savedPosition, pos > 30 {
             let token = item.observe(\.status, options: [.new]) { [weak item, weak self] obs, _ in
                 guard obs.status == .readyToPlay, let item = item else { return }
+                self?.resumeStatusObservation = nil
                 let duration = CMTimeGetSeconds(item.duration)
                 // Đừng seek nếu gần cuối (< 30s) — coi như đã xem xong
-                guard duration.isFinite && duration > 0 && pos < duration - 30 else { return }
+                guard duration.isFinite && duration > 0 && pos < duration - 30 else {
+                    if let url = self?.episodeUrl { PlaybackStore.shared.clearPosition(for: url) }
+                    return
+                }
                 item.seek(to: CMTime(seconds: pos, preferredTimescale: 600)) { _ in
                     Logger.shared.log("[Resume] Tua tới \(Int(pos))s (đã lưu trước đó)")
                 }
-                self?.resumeStatusObservation = nil
             }
             resumeStatusObservation = token
         }
@@ -318,29 +364,26 @@ class PlayerController: UIViewController {
             guard let self = self, let url = self.episodeUrl else { return }
             let secs = CMTimeGetSeconds(time)
             if secs.isFinite {
-                PlaybackStore.shared.savePosition(secs, for: url)
+                self.persistCurrentPosition(for: url, clearWhenNearStart: false)
             }
         }
 
         // Ghi lịch sử (movie + episode index + title)
-        if let movie = movie, currentIndex < episodes.count {
+        if let movie = movie, episodes.indices.contains(currentIndex) {
             PlaybackStore.shared.recordWatch(movie: movie,
                                              episodeIndex: currentIndex,
-                                             episodeTitle: episodes[currentIndex].title)
+                                             episodeTitle: episodes[currentIndex].title,
+                                             episodeURL: episodes[currentIndex].link)
         }
 
         player.play()
     }
 
     private func showFailure() {
+        tearDownAttachedPlayer()
+
         // Gỡ AVPlayerViewController nếu đang attach — nếu không, view nó sẽ che hết
         // logs và user chỉ nhìn thấy logo gạch chéo.
-        for child in children {
-            child.willMove(toParent: nil)
-            child.view.removeFromSuperview()
-            child.removeFromParent()
-        }
-
         statusLabel.text = "Không phát được phim.\nLog gần nhất ở dưới — bấm Copy để gửi dev."
         statusLabel.isHidden = false
         logTextView.text = Logger.shared.snapshot()
@@ -465,14 +508,29 @@ class PlayerController: UIViewController {
     }
 
     @objc private func retry() {
-        if let url = episodeUrl, let player = currentPlayer {
-            let secs = CMTimeGetSeconds(player.currentTime())
-            if secs.isFinite { PlaybackStore.shared.savePosition(secs, for: url) }
+        restartPlayback(persistCurrentPosition: true)
+    }
+
+    private func restartPlayback(persistCurrentPosition: Bool) {
+        if persistCurrentPosition { self.persistCurrentPosition() }
+        tearDownAttachedPlayer()
+        startResolve()
+    }
+
+    /// Releases every resource associated with the currently attached AVPlayer.
+    /// Keeping this in one place prevents failed/retried items from continuing to
+    /// fire notifications or periodic progress writes behind the error screen.
+    private func tearDownAttachedPlayer() {
+        if let token = periodicTimeToken {
+            currentPlayer?.removeTimeObserver(token)
+            periodicTimeToken = nil
         }
+        currentPlayer?.pause()
         diagTimer?.invalidate(); diagTimer = nil
-        m3u8Loader = nil
         statusObservation?.invalidate()
         statusObservation = nil
+        resumeStatusObservation?.invalidate()
+        resumeStatusObservation = nil
         if let o = errorObserver { NotificationCenter.default.removeObserver(o); errorObserver = nil }
         if let o = stallObserver { NotificationCenter.default.removeObserver(o); stallObserver = nil }
         if let o = accessLogObserver { NotificationCenter.default.removeObserver(o); accessLogObserver = nil }
@@ -483,7 +541,7 @@ class PlayerController: UIViewController {
             child.view.removeFromSuperview()
             child.removeFromParent()
         }
-        startResolve()
+        m3u8Loader = nil
     }
 
     // MARK: - Nav bar items (không overlay, không che video)
@@ -498,42 +556,67 @@ class PlayerController: UIViewController {
         if episodes.count > 1 {
             let epItem = UIBarButtonItem(image: UIImage(systemName: "list.bullet.rectangle"), style: .plain, target: self, action: #selector(showEpisodePicker))
             epItem.tintColor = .white
+            epItem.accessibilityLabel = "Danh sách tập"
             items.append(epItem)
         }
 
         let speedItem = UIBarButtonItem(image: UIImage(systemName: "speedometer"), style: .plain, target: self, action: #selector(showSpeedPicker))
         speedItem.tintColor = .white
+        speedItem.accessibilityLabel = "Tốc độ phát"
         items.append(speedItem)
 
         if currentIndex + 1 < episodes.count {
             let nextItem = UIBarButtonItem(image: UIImage(systemName: "forward.fill"), style: .plain, target: self, action: #selector(skipToNextEpisode))
             nextItem.tintColor = .white
+            nextItem.accessibilityLabel = "Tập tiếp theo"
             items.append(nextItem)
+        }
+
+        if currentIndex > 0 && currentIndex < episodes.count {
+            let previousItem = UIBarButtonItem(image: UIImage(systemName: "backward.fill"), style: .plain, target: self, action: #selector(skipToPreviousEpisode))
+            previousItem.tintColor = .white
+            previousItem.accessibilityLabel = "Tập trước"
+            items.append(previousItem)
         }
 
         navigationItem.rightBarButtonItems = items
     }
 
     @objc private func skipToNextEpisode() {
-        playNextEpisodeIfAvailable()
+        playNextEpisodeIfAvailable(markCurrentCompleted: false)
+    }
+
+    @objc private func skipToPreviousEpisode() {
+        let previous = currentIndex - 1
+        guard episodes.indices.contains(previous) else { return }
+        persistCurrentPosition()
+        currentIndex = previous
+        episodeUrl = episodes[previous].link
+        updateEpisodeInfo()
+        updateNavBarItems()
+        restartPlayback(persistCurrentPosition: false)
     }
 
     @objc private func showSpeedPicker() {
         let speeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
         let picker = SpeedPickerViewController()
         picker.speeds = speeds
-        picker.currentSpeed = currentPlayer?.rate ?? 1.0
+        picker.currentSpeed = preferredPlaybackRate
         picker.onSelect = { [weak self] speed in
-            self?.currentPlayer?.rate = speed
+            guard let self = self else { return }
+            self.preferredPlaybackRate = speed
+            let wasPlaying = (self.currentPlayer?.rate ?? 0) > 0
+            self.currentPlayer?.defaultRate = speed
+            if wasPlaying { self.currentPlayer?.rate = speed }
         }
-        if let sheet = picker.sheetPresentationController {
+        if #available(iOS 15.0, *), let sheet = picker.sheetPresentationController {
             sheet.detents = [.medium()]
             sheet.prefersGrabberVisible = true
         }
         present(picker, animated: true)
     }
 
-    private func playNextEpisodeIfAvailable() {
+    private func playNextEpisodeIfAvailable(markCurrentCompleted: Bool) {
         let next = currentIndex + 1
         guard next < episodes.count else {
             Logger.shared.log("[PlayerController] Đã hết phim — không còn tập tiếp theo.")
@@ -542,20 +625,23 @@ class PlayerController: UIViewController {
         }
         Logger.shared.log("[PlayerController] Auto-next → tập \(next + 1)/\(episodes.count)")
 
-        if let url = episodeUrl { PlaybackStore.shared.clearPosition(for: url) }
-        if let movie = movie {
-            PlaybackStore.shared.recordWatch(movie: movie, episodeIndex: next, episodeTitle: episodes[next].title)
+        if let url = episodeUrl {
+            if markCurrentCompleted {
+                PlaybackStore.shared.clearPosition(for: url)
+            } else {
+                persistCurrentPosition(for: url)
+            }
         }
-
         currentIndex = next
         episodeUrl = episodes[next].link
         updateEpisodeInfo()
         updateNavBarItems()
-        retry()
+        restartPlayback(persistCurrentPosition: false)
     }
 
     private func showEndOfSeriesAlert() {
         if let url = episodeUrl { PlaybackStore.shared.clearPosition(for: url) }
+        if let movie = movie { PlaybackStore.shared.markCompleted(movie: movie) }
         let alert = UIAlertController(title: "Đã hết phim", message: "Bạn đã xem hết tất cả các tập hiện có.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
@@ -568,14 +654,15 @@ class PlayerController: UIViewController {
         pickerVC.currentIndex = currentIndex
         pickerVC.onSelect = { [weak self] idx in
             guard let self = self, idx != self.currentIndex else { return }
+            self.persistCurrentPosition()
             self.currentIndex = idx
             self.episodeUrl = self.episodes[idx].link
             self.dismiss(animated: true)
             self.updateEpisodeInfo()
             self.updateNavBarItems()
-            self.retry()
+            self.restartPlayback(persistCurrentPosition: false)
         }
-        if let sheet = pickerVC.sheetPresentationController {
+        if #available(iOS 15.0, *), let sheet = pickerVC.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
             sheet.prefersGrabberVisible = true
             sheet.prefersEdgeAttachedInCompactHeight = true
@@ -594,6 +681,7 @@ final class EpisodePickerViewController: UIViewController, UICollectionViewDataS
 
     private let titleLabel = UILabel()
     private var collectionView: UICollectionView!
+    private var lastLayoutWidth: CGFloat = 0
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -606,12 +694,9 @@ final class EpisodePickerViewController: UIViewController, UICollectionViewDataS
         view.addSubview(titleLabel)
 
         let layout = UICollectionViewFlowLayout()
-        let columns: CGFloat = 5
         let spacing: CGFloat = 8
         let insets: CGFloat = 16
-        let totalSpacing = insets * 2 + spacing * (columns - 1)
-        let cellWidth = (view.bounds.width - totalSpacing) / columns
-        layout.itemSize = CGSize(width: cellWidth, height: 44)
+        layout.itemSize = CGSize(width: 56, height: 44)
         layout.minimumLineSpacing = spacing
         layout.minimumInteritemSpacing = spacing
         layout.sectionInset = UIEdgeInsets(top: 8, left: insets, bottom: 16, right: insets)
@@ -634,6 +719,20 @@ final class EpisodePickerViewController: UIViewController, UICollectionViewDataS
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let width = collectionView.bounds.width
+        guard width > 0, abs(width - lastLayoutWidth) > 0.5,
+              let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else { return }
+        lastLayoutWidth = width
+        let spacing: CGFloat = 8
+        let insets: CGFloat = 16
+        let columns = max(4, min(10, Int((width - insets * 2 + spacing) / 64)))
+        let totalSpacing = insets * 2 + spacing * CGFloat(columns - 1)
+        layout.itemSize = CGSize(width: floor((width - totalSpacing) / CGFloat(columns)), height: 44)
+        layout.invalidateLayout()
     }
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { episodes.count }
@@ -674,6 +773,8 @@ final class EpisodePickerCell: UICollectionViewCell {
     required init?(coder: NSCoder) { fatalError() }
 
     func configure(number: Int, isCurrent: Bool, title: String) {
+        accessibilityLabel = title.isEmpty ? "Tập \(number)" : title
+        accessibilityTraits = isCurrent ? [.button, .selected] : [.button]
         if isCurrent {
             contentView.backgroundColor = UIColor.systemRed
             label.textColor = .white

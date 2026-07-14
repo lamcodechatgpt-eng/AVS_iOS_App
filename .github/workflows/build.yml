@@ -5,9 +5,13 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
@@ -19,12 +23,33 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
+      - name: Run unit tests
+        run: |
+          SIMULATOR_ID=$(xcrun simctl list devices available | grep -m1 'iPhone' | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+          test -n "$SIMULATOR_ID"
+          xcodebuild test \
+            -project AVS_iOS_App.xcodeproj \
+            -scheme AVS_iOS_App \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -derivedDataPath "$PWD/build-tests" \
+            -resultBundlePath "$PWD/TestResults.xcresult" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AVS-iOS-TestResults
+          path: TestResults.xcresult
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Build and archive
         run: |
-          xcodebuild clean build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -destination generic/platform=iOS CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO
+          xcodebuild clean build -project AVS_iOS_App.xcodeproj -scheme AVS_iOS_App -configuration Release -destination generic/platform=iOS -derivedDataPath "$PWD/build" CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE="" CODE_SIGNING_ALLOWED=NO
           mkdir -p Payload
-          cp -r ~/Library/Developer/Xcode/DerivedData/AVS_iOS_App-*/Build/Products/Release-iphoneos/AVS_iOS_App.app Payload/
-          zip -r AVS_iOS_App.ipa Payload
+          cp -R build/Build/Products/Release-iphoneos/AVS_iOS_App.app Payload/
+          ditto -c -k --sequesterRsrc --keepParent Payload AVS_iOS_App.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4

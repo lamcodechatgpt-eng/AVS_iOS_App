@@ -6,6 +6,8 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
     var episodes: [Episode] = []
     var collectionView: UICollectionView!
     private let loader = UIActivityIndicatorView(style: .large)
+    private let emptyLabel = UILabel()
+    private var lastLayoutWidth: CGFloat = 0
 
     private let bgView = BackgroundView()
 
@@ -16,24 +18,34 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
         setupBackground()
         setupCollectionView()
         setupLoader()
+        setupEmptyLabel()
         fetchEpisodes()
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
         coordinator.animate { _ in
-            self.updateCollectionViewLayout()
+            self.updateCollectionViewLayout(for: size.width)
         }
     }
 
-    private func updateCollectionViewLayout() {
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let width = collectionView.bounds.width
+        guard abs(width - lastLayoutWidth) > 0.5 else { return }
+        lastLayoutWidth = width
+        updateCollectionViewLayout(for: width)
+    }
+
+    private func updateCollectionViewLayout(for width: CGFloat) {
         guard let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else { return }
-        let columns: CGFloat = 5
         let interItem: CGFloat = 8
         let sideInset: CGFloat = 12
-        let totalSpacing = sideInset * 2 + interItem * (columns - 1)
-        let cellWidth = (view.bounds.width - totalSpacing) / columns
+        let columns = max(4, min(10, Int((width - sideInset * 2 + interItem) / 68)))
+        let totalSpacing = sideInset * 2 + interItem * CGFloat(columns - 1)
+        let cellWidth = (width - totalSpacing) / CGFloat(columns)
         layout.itemSize = CGSize(width: cellWidth, height: 50)
+        layout.headerReferenceSize = CGSize(width: width, height: 40)
         layout.invalidateLayout()
     }
 
@@ -52,12 +64,9 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
 
     private func setupCollectionView() {
         let layout = UICollectionViewFlowLayout()
-        let columns: CGFloat = 5
         let interItem: CGFloat = 8
         let sideInset: CGFloat = 12
-        let totalSpacing = sideInset * 2 + interItem * (columns - 1)
-        let cellWidth = (view.bounds.width - totalSpacing) / columns
-        layout.itemSize = CGSize(width: cellWidth, height: 50)
+        layout.itemSize = CGSize(width: 60, height: 50)
         layout.minimumLineSpacing = 10
         layout.minimumInteritemSpacing = interItem
         layout.sectionInset = UIEdgeInsets(top: 16, left: sideInset, bottom: 16, right: sideInset)
@@ -91,10 +100,29 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
         ])
     }
 
+    private func setupEmptyLabel() {
+        emptyLabel.text = "Không tải được danh sách tập.\nKéo xuống để thử lại."
+        emptyLabel.font = .preferredFont(forTextStyle: .body)
+        emptyLabel.adjustsFontForContentSizeCategory = true
+        emptyLabel.textColor = .secondaryLabel
+        emptyLabel.textAlignment = .center
+        emptyLabel.numberOfLines = 0
+        emptyLabel.isHidden = true
+        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(emptyLabel)
+        NSLayoutConstraint.activate([
+            emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
+            emptyLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24)
+        ])
+    }
+
     @objc private func refresh(_ rc: UIRefreshControl) {
         // Xoá cache để fetch lại
         if let url = movie?.link {
-            let key = "episodes." + (url.data(using: .utf8)?.base64EncodedString() ?? url)
+            let normalized = NetworkManager.shared.normalizeURL(url)
+            let key = "episodes." + (normalized.data(using: .utf8)?.base64EncodedString() ?? normalized)
             DiskCache.shared.remove(key)
         }
         fetchEpisodes()
@@ -102,12 +130,14 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
 
     private func fetchEpisodes() {
         guard let movie = movie else { return }
+        emptyLabel.isHidden = true
         if episodes.isEmpty { loader.startAnimating() }
         NetworkManager.shared.fetchEpisodes(movieUrl: movie.link) { [weak self] fetched in
             self?.episodes = fetched
             self?.loader.stopAnimating()
             self?.collectionView.refreshControl?.endRefreshing()
             self?.collectionView.reloadData()
+            self?.emptyLabel.isHidden = !fetched.isEmpty
         }
     }
 
@@ -134,6 +164,7 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
         playerVC.episodes = episodes
         playerVC.currentIndex = indexPath.row
         playerVC.episodeUrl = episodes[indexPath.row].link
+        playerVC.movie = movie
         self.navigationController?.pushViewController(playerVC, animated: true)
     }
 }
@@ -168,6 +199,9 @@ class EpisodeCell: UICollectionViewCell {
 
     func configure(with episode: Episode, number: Int, watched: Bool = false) {
         isWatched = watched
+        accessibilityLabel = episode.title.isEmpty ? "Tập \(number)" : episode.title
+        accessibilityValue = watched ? "Đã xem một phần" : "Chưa xem"
+        accessibilityTraits = .button
         if watched {
             contentView.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.1)
             contentView.layer.borderWidth = 1

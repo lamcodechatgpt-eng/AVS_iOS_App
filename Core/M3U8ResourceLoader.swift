@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UniformTypeIdentifiers
 
 /// Phục vụ playlist m3u8 từ memory cho AVPlayer qua custom URL scheme.
 /// AVPlayer nhiều khi không recognize HLS khi URL là `file://` (không có
@@ -25,15 +26,23 @@ final class M3U8ResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
 
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader,
                         shouldWaitForLoadingOfRequestedResource loadingRequest: AVAssetResourceLoadingRequest) -> Bool {
-        loadingRequest.contentInformationRequest?.contentType = "application/vnd.apple.mpegurl"
-        loadingRequest.contentInformationRequest?.contentLength = Int64(payload.count)
-        loadingRequest.contentInformationRequest?.isByteRangeAccessSupported = true
+        guard loadingRequest.request.url?.path.hasSuffix("playlist.m3u8") == true else {
+            loadingRequest.finishLoading(with: NSError(domain: NSURLErrorDomain,
+                                                        code: NSURLErrorUnsupportedURL))
+            return true
+        }
+        if let info = loadingRequest.contentInformationRequest {
+            info.contentType = UTType.m3uPlaylist.identifier
+            info.contentLength = Int64(payload.count)
+            info.isByteRangeAccessSupported = true
+        }
 
         if let dataRequest = loadingRequest.dataRequest {
-            let offset = Int(dataRequest.requestedOffset)
+            let rawOffset = dataRequest.currentOffset != 0 ? dataRequest.currentOffset : dataRequest.requestedOffset
+            let offset = max(0, Int(rawOffset))
             let length = dataRequest.requestedLength
-            let end = min(offset + length, payload.count)
             if offset < payload.count {
+                let end = offset + min(max(0, length), payload.count - offset)
                 let chunk = payload.subdata(in: offset..<end)
                 dataRequest.respond(with: chunk)
             }

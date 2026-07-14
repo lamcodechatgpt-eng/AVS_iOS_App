@@ -5,11 +5,39 @@ targets:
   AVS_iOS_App:
     type: application
     platform: iOS
-    deploymentTarget: "16.0"
+    deploymentTarget: "14.0"
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_FILE: Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.animevietsub.app
+        MARKETING_VERSION: "1.1"
+        CURRENT_PROJECT_VERSION: "2"
     sources:
       - path: Core
       - path: UI
       - path: Assets.xcassets
       - path: AppDelegate.swift
-    info:
-      path: Info.plist
+  AVS_iOS_AppTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "14.0"
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_BUNDLE_IDENTIFIER: com.animevietsub.app.tests
+    sources:
+      - path: Tests
+    dependencies:
+      - target: AVS_iOS_App
+schemes:
+  AVS_iOS_App:
+    build:
+      targets:
+        AVS_iOS_App: all
+        AVS_iOS_AppTests: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - name: AVS_iOS_AppTests

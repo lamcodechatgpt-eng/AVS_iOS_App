@@ -2,13 +2,17 @@
 *.zip
 Build_Output*/
 build/
+build-tests/
 DerivedData/
+Payload/
+*.ipa
 
 # Xcode
 *.xcuserstate
 xcuserdata/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
+AVS_iOS_App.xcodeproj/
 
 # Python debug scripts / scrapers (chỉ chạy local, không cần đẩy lên repo iOS app)
 selenium_test*.py

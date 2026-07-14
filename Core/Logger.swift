@@ -8,11 +8,14 @@ final class Logger {
     private let queue = DispatchQueue(label: "AVS.Logger", attributes: .concurrent)
     private var buffer: [String] = []
     private let capacity = 200
+    private let formatterLock = NSLock()
 
     private init() {}
 
     func log(_ message: String) {
+        formatterLock.lock()
         let timestamp = Logger.timestampFormatter.string(from: Date())
+        formatterLock.unlock()
         let line = "[\(timestamp)] \(message)"
         print(line)
         queue.async(flags: .barrier) {

@@ -1,22 +1,26 @@
-# AVS iOS App Skeleton
+# AVS iOS App
 
-Ứng dụng iOS native xem phim không quảng cáo.
+Ứng dụng iOS/iPadOS native xem phim, hỗ trợ từ iOS 14.
 
-## Trạng thái
-- Đã dựng Core Logic cào stream (`Extractor.swift`).
-- Đã dựng giao diện trình phát luồng HLS (`PlayerController.swift`).
+## Tính năng
+- Trang chủ, phim mới, tìm kiếm gợi ý và danh sách thể loại tự đồng bộ từ domain hiện tại.
+- Chi tiết phim, danh sách tập, lịch sử xem, yêu thích và xem tiếp.
+- Phát HLS/MP4, Picture in Picture, AirPlay, đổi tốc độ và tự chuyển tập.
+- Chọn tập trước/sau, ghi nhớ vị trí phát và tiếp tục xem.
+- Giữ lịch sử, yêu thích và tiến độ khi AnimeVietsub đổi domain; đánh dấu phim đã xem xong.
+- Hỗ trợ iPhone/iPad, xoay ngang và đa nhiệm trên iPad.
+- Nhận `PLAYER_DATA`, iframe và URL stream tuyệt đối/relative/protocol-relative.
+- Có unit test cho bộ tách luồng, viết lại playlist HLS và dữ liệu tiến độ xem.
 
 ## Hướng dẫn Build ra IPA từ Windows
 Vì Apple khóa hệ sinh thái, việc build native Swift trên Windows yêu cầu đường vòng.
 
 **Cách 1: Push lên GitHub Actions (Khuyên dùng)**
-1. Khởi tạo Git ở folder này.
-2. Viết file `.github/workflows/build.yml` gọi runner `macos-latest`.
-3. Action sẽ dùng `xcodebuild` để compile và xuất artifact là file `.ipa` cho bạn tải về.
+1. Push nhánh lên GitHub hoặc chạy workflow `Build iOS IPA` thủ công.
+2. Workflow tạo project bằng XcodeGen, chạy unit test trên iOS Simulator rồi build bản Release.
+3. Khi tất cả bước đạt, tải artifact `AVS_iOS_App-IPA` trong trang Actions.
 
 **Cách 2: Build qua máy ảo macOS (VMware/VirtualBox)**
 1. Dựng máy ảo macOS, tải Xcode.
-2. Kéo folder này vào, dựng `xcodeproj`, cắm iPhone vào máy hoặc chọn Product -> Archive để xuất `.ipa`.
-
-**Cách 3: Chuyển hướng sang React Native / Expo**
-Nếu muốn code và build test thẳng trên Windows (chạy qua app Expo Go trên iPhone), tôi có thể tạo project Expo thay vì native Swift.
+2. Trong thư mục dự án chạy `xcodegen generate`, sau đó mở `AVS_iOS_App.xcodeproj` bằng Xcode.
+3. Chọn simulator để chạy test, hoặc chọn thiết bị thật và Product → Archive để ký/phân phối ứng dụng.

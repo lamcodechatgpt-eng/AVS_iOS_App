@@ -8,13 +8,18 @@ enum HomeSection: Int, CaseIterable {
 }
 
 struct HomeItem: Hashable {
-    let id = UUID()
+    let id: String
     let movie: Movie?
     let progress: Double?
 
-    init(movie: Movie?, progress: Double? = nil) {
+    init(movie: Movie?, progress: Double? = nil, namespace: String) {
         self.movie = movie
         self.progress = progress
+        let movieID = movie.map {
+            let link = $0.link.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return link.isEmpty ? $0.title : link
+        } ?? UUID().uuidString
+        self.id = "\(namespace):\(movieID)"
     }
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -35,12 +40,16 @@ final class HomeViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<HomeSection, HomeItem>!
     private let spinner = UIActivityIndicatorView(style: .large)
+    private let emptyStateLabel = UILabel()
+    private let retryButton = UIButton(type: .system)
     private var skeletonVisible = false
 
     // MARK: - Pagination
     private var currentPage = 2
     private var isLoadingMore = false
     private var hasMore = true
+    private var dataGeneration = 0
+    private var isPaginationEnabled = true
 
     // MARK: - Search
     private let suggestionsVC = SearchSuggestionsViewController()
@@ -56,7 +65,15 @@ final class HomeViewController: UIViewController {
         setupNavigationItems()
         setupSearch()
         setupSpinner()
+        setupEmptyState()
         fetchData()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        guard dataSource != nil else { return }
+        loadContinueWatching()
+        applySnapshot()
     }
 
     // MARK: - Setup
@@ -82,23 +99,23 @@ final class HomeViewController: UIViewController {
     }
 
     private func createLayout() -> UICollectionViewCompositionalLayout {
-        UICollectionViewCompositionalLayout { [weak self] sectionIndex, _ in
-            guard let self = self else { return nil }
+        UICollectionViewCompositionalLayout { sectionIndex, environment in
             let section = HomeSection(rawValue: sectionIndex) ?? .grid
+            let width = environment.container.effectiveContentSize.width
 
             switch section {
             case .hero:
-                return Self.heroSection()
+                return Self.heroSection(containerWidth: width)
             case .continueWatching:
                 return Self.horizontalScrollSection()
             case .grid:
-                return self.gridSection()
+                return Self.gridSection(containerWidth: width)
             }
         }
     }
 
-    private static func heroSection() -> NSCollectionLayoutSection {
-        let h = UIScreen.main.bounds.width * 0.56
+    private static func heroSection(containerWidth: CGFloat) -> NSCollectionLayoutSection {
+        let h = min(max(containerWidth * 0.56, 210), 430)
         let item = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .fractionalHeight(1)))
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(h)), subitems: [item])
         let section = NSCollectionLayoutSection(group: group)
@@ -117,16 +134,20 @@ final class HomeViewController: UIViewController {
         return section
     }
 
-    private func gridSection() -> NSCollectionLayoutSection {
-        let w = view.bounds.width
-        let side = (w - 44) / 3
-        let itemSize = NSCollectionLayoutSize(widthDimension: .absolute(side), heightDimension: .absolute(side * 1.6))
+    private static func gridSection(containerWidth: CGFloat) -> NSCollectionLayoutSection {
+        let columns: Int = containerWidth >= 900 ? 6 : (containerWidth >= 650 ? 5 : (containerWidth >= 480 ? 4 : 3))
+        let sideInsets: CGFloat = 12
+        let spacing: CGFloat = 10
+        let available = containerWidth - sideInsets * 2 - spacing * CGFloat(columns - 1)
+        let side = max(80, available / CGFloat(columns))
+        let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1),
+                                              heightDimension: .fractionalHeight(1))
         let item = NSCollectionLayoutItem(layoutSize: itemSize)
         let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(side * 1.6))
-        let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
-        group.interItemSpacing = NSCollectionLayoutSpacing.fixed(10)
+        let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitem: item, count: columns)
+        group.interItemSpacing = NSCollectionLayoutSpacing.fixed(spacing)
         let section = NSCollectionLayoutSection(group: group)
-        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 12, bottom: 24, trailing: 12)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: sideInsets, bottom: 24, trailing: sideInsets)
         section.boundarySupplementaryItems = [Self.headerItem()]
         return section
     }
@@ -149,7 +170,7 @@ final class HomeViewController: UIViewController {
                 return cell
             case .continueWatching:
                 let cell = cv.dequeueReusableCell(withReuseIdentifier: "CW", for: ip) as! ContinueWatchingCell
-                cell.configure(with: item.movie?.thumbUrl, progress: item.progress ?? 0)
+                cell.configure(with: item.movie, progress: item.progress ?? 0)
                 return cell
             case .grid:
                 let cell = cv.dequeueReusableCell(withReuseIdentifier: "Movie", for: ip) as! MovieCell
@@ -158,7 +179,8 @@ final class HomeViewController: UIViewController {
             }
         }
 
-        dataSource.supplementaryViewProvider = { cv, kind, ip in
+        dataSource.supplementaryViewProvider = { [weak self] cv, kind, ip in
+            guard let self = self else { return nil }
             let section = HomeSection(rawValue: ip.section) ?? .grid
             guard section != .hero else { return nil }
             let header = cv.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "Header", for: ip) as! SectionHeader
@@ -173,56 +195,69 @@ final class HomeViewController: UIViewController {
 
     // MARK: - Data
     private func fetchData() {
+        dataGeneration += 1
+        let generation = dataGeneration
+        isPaginationEnabled = true
+        showEmptyState(nil)
         if movies.isEmpty {
             showSkeleton(true)
         }
         NetworkManager.shared.fetchHomeMovies { [weak self] fetched in
-            guard let self = self else { return }
+            guard let self = self, self.dataGeneration == generation else { return }
             self.movies = fetched
             self.heroMovies = Array(fetched.prefix(5))
             self.loadContinueWatching()
             self.collectionView.refreshControl?.endRefreshing()
             self.showSkeleton(false)
             self.applySnapshot()
+            self.showEmptyState(fetched.isEmpty ? "Không tải được danh sách phim.\nKiểm tra domain hoặc kết nối mạng." : nil)
         }
     }
 
     private func loadContinueWatching() {
         let store = PlaybackStore.shared
         let entries = store.history()
-        continueWatching = entries.map { entry in
-            var lastProgress: Double = 0
-            if let epsUrl = entry.movie.link.data(using: .utf8) {
-                let pos = store.position(for: entry.movie.link)
-                lastProgress = pos ?? 0
-            }
-            return HomeItem(movie: entry.movie, progress: lastProgress)
+        continueWatching = entries.filter { $0.isCompleted != true }.map { entry in
+            let progress = entry.lastEpisodeURL.flatMap { store.progress(for: $0) } ?? 0
+            return HomeItem(movie: entry.movie, progress: progress, namespace: "continue")
         }
     }
 
     private func applySnapshot() {
+        let previousItems = Dictionary(uniqueKeysWithValues:
+            dataSource.snapshot().itemIdentifiers.map { ($0.id, $0) })
         var snap = NSDiffableDataSourceSnapshot<HomeSection, HomeItem>()
         snap.appendSections(HomeSection.allCases)
 
         if !heroMovies.isEmpty {
-            snap.appendItems(heroMovies.map { HomeItem(movie: $0) }, toSection: .hero)
+            snap.appendItems(heroMovies.map { HomeItem(movie: $0, namespace: "hero") }, toSection: .hero)
         }
         if !continueWatching.isEmpty {
             snap.appendItems(continueWatching, toSection: .continueWatching)
         }
-        snap.appendItems(movies.map { HomeItem(movie: $0) }, toSection: .grid)
+        snap.appendItems(movies.map { HomeItem(movie: $0, namespace: "grid") }, toSection: .grid)
+
+        // Stable identifiers preserve scroll position during pagination. Explicitly
+        // reload only entries whose display payload changed (usually watch progress).
+        let changedItems = snap.itemIdentifiers.filter { item in
+            guard let previous = previousItems[item.id] else { return false }
+            return previous.movie != item.movie || previous.progress != item.progress
+        }
+        if !changedItems.isEmpty { snap.reloadItems(changedItems) }
 
         dataSource.apply(snap, animatingDifferences: false)
     }
 
     // MARK: - Pagination
     private func loadMore() {
-        guard hasMore, !isLoadingMore else { return }
+        guard isPaginationEnabled, hasMore, !isLoadingMore else { return }
         isLoadingMore = true
+        let generation = dataGeneration
         let next = currentPage + 1
         NetworkManager.shared.fetchMoviesPage(next) { [weak self] new in
             guard let self = self else { return }
             self.isLoadingMore = false
+            guard self.dataGeneration == generation else { return }
             if new.isEmpty {
                 self.hasMore = false
                 return
@@ -237,6 +272,7 @@ final class HomeViewController: UIViewController {
     }
 
     @objc private func pullToRefresh() {
+        navigationItem.title = "AnimeVietsub"
         DiskCache.shared.remove("home")
         currentPage = 2
         hasMore = true
@@ -246,11 +282,16 @@ final class HomeViewController: UIViewController {
 
     // MARK: - Navigation
     private func setupNavigationItems() {
-        navigationItem.rightBarButtonItems = [
-            UIBarButtonItem(image: UIImage(systemName: "gearshape"), style: .plain, target: self, action: #selector(openDomainSettings)),
-            UIBarButtonItem(image: UIImage(systemName: "square.grid.2x2"), style: .plain, target: self, action: #selector(openGenrePicker)),
-            UIBarButtonItem(image: UIImage(systemName: "shuffle"), style: .plain, target: self, action: #selector(openRandom))
-        ]
+        let settings = UIBarButtonItem(image: UIImage(systemName: "gearshape"), style: .plain,
+                                       target: self, action: #selector(openDomainSettings))
+        settings.accessibilityLabel = "Cài đặt domain"
+        let genres = UIBarButtonItem(image: UIImage(systemName: "square.grid.2x2"), style: .plain,
+                                     target: self, action: #selector(openGenrePicker))
+        genres.accessibilityLabel = "Chọn thể loại"
+        let random = UIBarButtonItem(image: UIImage(systemName: "shuffle"), style: .plain,
+                                     target: self, action: #selector(openRandom))
+        random.accessibilityLabel = "Chọn phim ngẫu nhiên"
+        navigationItem.rightBarButtonItems = [settings, genres, random]
     }
 
     @objc private func openDomainSettings() {
@@ -260,7 +301,7 @@ final class HomeViewController: UIViewController {
             preferredStyle: .alert
         )
         alert.addTextField { tf in
-            tf.placeholder = "https://animevietsub.pl"
+            tf.placeholder = "https://animevietsub.meme"
             tf.keyboardType = .URL
             tf.text = NetworkManager.shared.resolvedDomain
         }
@@ -268,7 +309,25 @@ final class HomeViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "Lưu", style: .default) { _ in
             guard let text = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !text.isEmpty else { return }
+            guard let url = URL(string: text),
+                  let scheme = url.scheme?.lowercased(),
+                  (scheme == "http" || scheme == "https"),
+                  url.host != nil else {
+                let error = UIAlertController(title: "Domain không hợp lệ",
+                                              message: "Hãy nhập địa chỉ đầy đủ, ví dụ https://animevietsub.meme",
+                                              preferredStyle: .alert)
+                error.addAction(UIAlertAction(title: "OK", style: .default))
+                self.present(error, animated: true)
+                return
+            }
+            let previous = NetworkManager.shared.resolvedDomain
             NetworkManager.shared.resolvedDomain = text
+            guard NetworkManager.shared.resolvedDomain != previous else { return }
+            self.movies.removeAll()
+            self.heroMovies.removeAll()
+            self.currentPage = 2
+            self.hasMore = true
+            self.fetchData()
         })
         present(alert, animated: true)
     }
@@ -281,7 +340,7 @@ final class HomeViewController: UIViewController {
     @objc private func openGenrePicker() {
         let vc = GenreSelectionViewController()
         let nav = UINavigationController(rootViewController: vc)
-        if let sheet = nav.sheetPresentationController {
+        if #available(iOS 15.0, *), let sheet = nav.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
             sheet.prefersGrabberVisible = true
         }
@@ -292,26 +351,35 @@ final class HomeViewController: UIViewController {
         present(nav, animated: true)
     }
 
-    private func loadMultipleGenres(_ genres: [(name: String, slug: String)]) {
+    private func loadMultipleGenres(_ genres: [GenreOption]) {
+        dataGeneration += 1
+        let generation = dataGeneration
+        isPaginationEnabled = false
         navigationItem.title = genres.map(\.name).joined(separator: ", ")
+        showEmptyState(nil)
         spinner.startAnimating()
         collectionView.isHidden = true
 
         var allMovies: [Movie] = []
         var remaining = genres.map(\.slug)
         func next() {
+            guard self.dataGeneration == generation else { return }
             guard !remaining.isEmpty else {
                 var seen = Set<String>()
                 self.movies = allMovies.filter { seen.insert($0.link).inserted }
+                self.heroMovies = Array(self.movies.prefix(5))
                 self.spinner.stopAnimating()
                 self.collectionView.isHidden = false
                 self.applySnapshot()
+                self.showEmptyState(self.movies.isEmpty ? "Không tìm thấy phim thuộc các thể loại đã chọn." : nil)
                 return
             }
             let slug = remaining.removeFirst()
             let url = "\(NetworkManager.shared.resolvedDomain)/the-loai/\(slug)/"
             NetworkManager.shared.fetchHTML(url: url) { html in
+                guard self.dataGeneration == generation else { return }
                 NetworkManager.shared.parseMovies(html: html) { fetched in
+                    guard self.dataGeneration == generation else { return }
                     allMovies.append(contentsOf: fetched)
                     next()
                 }
@@ -358,6 +426,46 @@ final class HomeViewController: UIViewController {
             spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
     }
+
+    private func setupEmptyState() {
+        emptyStateLabel.font = .preferredFont(forTextStyle: .body)
+        emptyStateLabel.adjustsFontForContentSizeCategory = true
+        emptyStateLabel.textColor = .secondaryLabel
+        emptyStateLabel.textAlignment = .center
+        emptyStateLabel.numberOfLines = 0
+        emptyStateLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        retryButton.setTitle("Thử lại", for: .normal)
+        retryButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
+        retryButton.addTarget(self, action: #selector(retryHome), for: .touchUpInside)
+        retryButton.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(emptyStateLabel)
+        view.addSubview(retryButton)
+        NSLayoutConstraint.activate([
+            emptyStateLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            emptyStateLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -18),
+            emptyStateLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 32),
+            emptyStateLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -32),
+            retryButton.topAnchor.constraint(equalTo: emptyStateLabel.bottomAnchor, constant: 12),
+            retryButton.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+        ])
+        showEmptyState(nil)
+    }
+
+    private func showEmptyState(_ message: String?) {
+        emptyStateLabel.text = message
+        emptyStateLabel.isHidden = message == nil
+        retryButton.isHidden = message == nil
+    }
+
+    @objc private func retryHome() {
+        navigationItem.title = "AnimeVietsub"
+        movies.removeAll()
+        heroMovies.removeAll()
+        DiskCache.shared.remove("home")
+        fetchData()
+    }
 }
 
 // MARK: - UICollectionViewDelegate + Prefetch
@@ -392,8 +500,11 @@ extension HomeViewController: UISearchBarDelegate, UISearchResultsUpdating {
             return
         }
         suggestionsVC.update(movies: suggestionsVC.movies, query: text, loading: true)
-        let work = DispatchWorkItem {
+        let work = DispatchWorkItem { [weak self, weak sc] in
             NetworkManager.shared.fetchSearchSuggestions(keyword: text) { results in
+                guard let self = self,
+                      let current = sc?.searchBar.text?.trimmingCharacters(in: .whitespaces),
+                      current == text else { return }
                 self.suggestionsVC.update(movies: results, query: text, loading: false)
             }
         }
@@ -402,24 +513,33 @@ extension HomeViewController: UISearchBarDelegate, UISearchResultsUpdating {
     }
 
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        guard let text = searchBar.text, !text.isEmpty else { return }
-        let keyword = text.folding(options: .diacriticInsensitive, locale: Locale(identifier: "vi_VN"))
-            .replacingOccurrences(of: "đ", with: "d").replacingOccurrences(of: "Đ", with: "D")
-            .lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: "+")
+        guard let rawText = searchBar.text else { return }
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        guard let keyword = SearchUtilities.pathComponent(from: text) else { return }
+        dataGeneration += 1
+        let generation = dataGeneration
+        isPaginationEnabled = false
+        showEmptyState(nil)
         spinner.startAnimating()
         collectionView.isHidden = true
         let url = "\(NetworkManager.shared.resolvedDomain)/tim-kiem/\(keyword)/"
         NetworkManager.shared.fetchHTML(url: url) { html in
+            guard self.dataGeneration == generation else { return }
             NetworkManager.shared.parseMovies(html: html) { fetched in
+                guard self.dataGeneration == generation else { return }
                 self.movies = fetched
+                self.heroMovies = Array(fetched.prefix(5))
                 self.spinner.stopAnimating()
                 self.collectionView.isHidden = false
                 self.applySnapshot()
+                self.showEmptyState(fetched.isEmpty ? "Không tìm thấy phim phù hợp." : nil)
             }
         }
     }
 
     func searchBarCancelButtonClicked(_: UISearchBar) {
+        navigationItem.title = "AnimeVietsub"
         fetchData()
     }
 }
@@ -478,13 +598,18 @@ final class HeroBannerCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        ImageLoader.shared.cancelLoad(for: imageView)
         imageView.image = nil
-        overlayGradient.removeFromSuperlayer()
+        imageView.tag = 0
     }
 
     func configure(with movie: Movie) {
         titleLabel.text = movie.title
         genreLabel.text = movie.episodeStatus
+        isAccessibilityElement = true
+        accessibilityLabel = movie.title
+        accessibilityValue = movie.episodeStatus.isEmpty ? nil : movie.episodeStatus
+        accessibilityTraits = .button
         if let url = URL(string: movie.thumbUrl) {
             ImageLoader.shared.load(url, into: imageView)
         }
@@ -541,14 +666,20 @@ final class ContinueWatchingCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        ImageLoader.shared.cancelLoad(for: imageView)
         imageView.image = nil
+        imageView.tag = 0
     }
 
-    func configure(with thumbUrl: String?, progress: Double) {
-        if let urlStr = thumbUrl, let url = URL(string: urlStr) {
+    func configure(with movie: Movie?, progress: Double) {
+        if let urlStr = movie?.thumbUrl, let url = URL(string: urlStr) {
             ImageLoader.shared.load(url, into: imageView)
         }
-        let ratio = min(max(progress / 1440, 0), 1)
+        let ratio = min(max(progress, 0), 1)
+        isAccessibilityElement = true
+        accessibilityLabel = movie?.title ?? "Phim đang xem"
+        accessibilityValue = "Đã xem \(Int((ratio * 100).rounded())) phần trăm"
+        accessibilityTraits = .button
         progressWidthConstraint.isActive = false
         progressWidthConstraint = progressBar.widthAnchor.constraint(equalTo: progressTrack.widthAnchor, multiplier: CGFloat(ratio))
         progressWidthConstraint.isActive = true
@@ -645,7 +776,9 @@ class MovieCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        ImageLoader.shared.cancelLoad(for: imageView)
         imageView.image = nil
+        imageView.tag = 0
         titleLabel.text = nil
         epsLabel.text = nil
         epsBackground.isHidden = true
@@ -678,5 +811,9 @@ class MovieCell: UICollectionViewCell {
         if let url = URL(string: movie.thumbUrl) {
             ImageLoader.shared.load(url, into: imageView)
         }
+        isAccessibilityElement = true
+        accessibilityLabel = movie.title
+        accessibilityValue = trimmed.isEmpty ? nil : trimmed
+        accessibilityTraits = .button
     }
 }

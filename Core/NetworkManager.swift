@@ -1,23 +1,37 @@
 import Foundation
+import UIKit
 import WebKit
 
 class NetworkManager: NSObject, WKNavigationDelegate {
     static let shared = NetworkManager()
     
-    private static let defaultDomain = "https://animevietsub.pl"
+    private static let defaultDomain = "https://animevietsub.meme"
 
     var resolvedDomain: String {
         get {
-            UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") ?? Self.defaultDomain
+            let stored = UserDefaults.standard.string(forKey: "AVS_ResolvedDomain")
+            return stored == "https://animevietsub.pl" ? Self.defaultDomain : (stored ?? Self.defaultDomain)
         }
         set {
-            let cleaned = newValue.hasSuffix("/") ? String(newValue.dropLast()) : newValue
-            guard cleaned.hasPrefix("http") else {
+            let candidate = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let url = URL(string: candidate),
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https",
+                  let host = url.host, !host.isEmpty else {
                 Logger.shared.log("Bỏ qua domain không hợp lệ: \(newValue)")
+                return
+            }
+            var components = URLComponents()
+            components.scheme = scheme
+            components.host = host
+            components.port = url.port
+            guard let cleaned = components.url?.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) else {
+                Logger.shared.log("Bỏ qua domain không thể chuẩn hoá: \(newValue)")
                 return
             }
             if UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") != cleaned {
                 UserDefaults.standard.set(cleaned, forKey: "AVS_ResolvedDomain")
+                DiskCache.shared.removeAll()
                 Logger.shared.log("Đã cập nhật domain mới: \(cleaned)")
             }
         }
@@ -25,30 +39,49 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     
     /// Ép URL về đúng resolvedDomain hiện tại, dù link gốc chứa domain cũ.
     func normalizeURL(_ urlString: String) -> String {
-        guard !urlString.hasPrefix("http") else {
-            guard let url = URL(string: urlString),
-                  let currentBase = URL(string: resolvedDomain),
-                  url.host?.lowercased() != currentBase.host?.lowercased() else {
-                return urlString
+        var raw = urlString.replacingOccurrences(of: "&amp;", with: "&")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty, let currentBase = URL(string: resolvedDomain) else { return urlString }
+        if raw.hasPrefix("//") { raw = "\(currentBase.scheme ?? "https"):\(raw)" }
+
+        if let url = URL(string: raw),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            guard url.host?.lowercased() != currentBase.host?.lowercased() else {
+                return url.absoluteString
             }
             var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
             comps?.scheme = currentBase.scheme
             comps?.host = currentBase.host
             comps?.port = currentBase.port
-            return comps?.url?.absoluteString ?? urlString
+            return comps?.url?.absoluteString ?? raw
         }
-        let base = resolvedDomain.hasSuffix("/") ? String(resolvedDomain.dropLast()) : resolvedDomain
-        let path = urlString.hasPrefix("/") ? urlString : "/" + urlString
-        return base + path
+
+        guard let base = URL(string: resolvedDomain + "/") else { return raw }
+        return URL(string: raw, relativeTo: base)?.absoluteURL.absoluteString ?? raw
     }
     
     private var webView: WKWebView!
-    private var completionQueue: [(String) -> Void] = []
+    private struct HTMLRequest {
+        let url: String
+        let waitForIframe: Bool
+        let completion: (String) -> Void
+    }
+
+    private var htmlRequestQueue: [HTMLRequest] = []
+    private var activeHTMLCompletion: ((String) -> Void)?
+    private var isLoadingHTML = false
     private var currentLoadId: Int = 0
+    private var lastCapturedVideoSrc = ""
+    private var activeNavigation: WKNavigation?
     
     override init() {
         super.init()
-        DispatchQueue.main.async {
+        if UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") == "https://animevietsub.pl" {
+            UserDefaults.standard.set(Self.defaultDomain, forKey: "AVS_ResolvedDomain")
+            DiskCache.shared.removeAll()
+        }
+        let setupWebView = {
             let config = WKWebViewConfiguration()
             let userController = WKUserContentController()
             
@@ -56,7 +89,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             let jsHook = """
             (function() {
                 // Regex dùng chung cho cả URL lẫn body text
-                var M3U8_RE = /https?:\\/\\/[^\\s"'<>\\\\]+?\\.m3u8[^\\s"'<>\\\\]*/gi;
+                var M3U8_RE = /https?:\\/\\/[^\\s"'<>\\\\]+?\\.(m3u8|mp4)[^\\s"'<>\\\\]*/gi;
                 var IFRAME_HOSTS_RE = /https?:\\/\\/[^\\s"'<>\\\\]*?(googleapiscdn|streamlare|hydrax|fembed|streamtape|filemoon)[^\\s"'<>\\\\]+/gi;
 
                 var injectInBody = function(text) {
@@ -70,7 +103,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 var injectM3u8Marker = function(url) {
                     if (!url || typeof url !== 'string') return;
                     var clean = url.replace(/\\\\\\//g, '/');
-                    if (clean.indexOf('.m3u8') === -1) return;
+                    var lower = clean.toLowerCase();
+                    if (lower.indexOf('.m3u8') === -1 && lower.indexOf('.mp4') === -1) return;
                     injectInBody('file: "' + clean + '"');
                     try {
                         if (window.top && window.top !== window) {
@@ -215,8 +249,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
 
                     if (!isIframePlayer && !isAVSWatch) { setTimeout(autoPlay, 500); return; }
 
-                    // Đã có m3u8 URL thật trong DOM → dừng (đã xong việc).
-                    if (/[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.m3u8/i.test(topHTML)) return;
+                    // Đã có URL media thật trong DOM → dừng (đã xong việc).
+                    if (/[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.(m3u8|mp4)/i.test(topHTML)) return;
 
                     // Trên trang AVS: PLAYER_DATA đã được render server-side. Extractor
                     // sẽ bóc từ HTML, KHÔNG CẦN click bất cứ gì. Click vào episode link
@@ -290,67 +324,140 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             self.webView.isHidden = false
             self.webView.alpha = 1.0
         }
+        if Thread.isMainThread {
+            setupWebView()
+        } else {
+            DispatchQueue.main.async(execute: setupWebView)
+        }
     }
     
     // Tải HTML thông qua WKWebView để tự động bypass Cloudflare/Bot-check
     func fetchHTML(url: String, waitForIframe: Bool = false, completion: @escaping (String) -> Void) {
-        DispatchQueue.main.async {
-            // Phải add vào view hierarchy thì WKWebView mới chạy thực tế trên iOS
-            if self.webView.superview == nil, let window = UIApplication.shared.windows.first {
-                window.addSubview(self.webView)
+        let enqueue = {
+            let request = HTMLRequest(url: url,
+                                      waitForIframe: waitForIframe,
+                                      completion: completion)
+            let path = URL(string: url)?.path.lowercased() ?? ""
+            let isPlaybackRequest = waitForIframe
+                || path.contains("xem-phim")
+                || path.contains("-tap-")
+                || path.contains("/tap-")
+                || path.contains("/player/")
+            if isPlaybackRequest {
+                self.htmlRequestQueue.insert(request, at: 0)
+            } else {
+                self.htmlRequestQueue.append(request)
             }
-
-            self.currentLoadId += 1
-            let loadId = self.currentLoadId
-
-            // Trả về chuỗi rỗng cho các request cũ để tránh bị treo (hang) UI
-            for oldCompletion in self.completionQueue {
-                oldCompletion("")
-            }
-            self.completionQueue.removeAll()
-            self.completionQueue.append(completion)
-
-            if let targetUrl = URL(string: url) {
-                var req = URLRequest(url: targetUrl)
-                req.setValue(self.resolvedDomain + "/", forHTTPHeaderField: "Referer")
-                self.webView.load(req)
-                // Trang xem phim cần ~40s vì còn phải chờ JS auto-click → AJAX trả luồng.
-                // Trang chủ/tìm kiếm/thông tin chỉ cần render HTML tĩnh nên 15s là đủ;
-                // hết thì rơi xuống fallback (bit.ly) ngay thay vì để user chờ mãi.
-                let path = targetUrl.path
-                let isWatchLike = waitForIframe
-                    || path.contains("xem-phim")
-                    || path.contains("-tap-")
-                    || path.contains("/tap-")
-                // Giảm số lần retry + poll nhanh hơn để load nhanh
-                let retries: Int
-                if waitForIframe {
-                    retries = 16
-                } else if isWatchLike {
-                    retries = 10
-                } else {
-                    retries = 6
-                }
-                self.checkDOM(webView: self.webView, loadId: loadId, retries: retries, waitForIframe: waitForIframe)
-            }
+            self.startNextHTMLRequestIfNeeded()
         }
+        if Thread.isMainThread {
+            enqueue()
+        } else {
+            DispatchQueue.main.async(execute: enqueue)
+        }
+    }
+
+    /// WKWebView chỉ điều hướng được một trang tại một thời điểm. Xử lý tuần tự để
+    /// refresh nền, tìm kiếm và mở phim không hủy callback của nhau.
+    private func startNextHTMLRequestIfNeeded() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard !isLoadingHTML, !htmlRequestQueue.isEmpty else { return }
+
+        let request = htmlRequestQueue.removeFirst()
+        isLoadingHTML = true
+        activeHTMLCompletion = request.completion
+        lastCapturedVideoSrc = ""
+        currentLoadId += 1
+        let loadId = currentLoadId
+
+        guard let targetURL = URL(string: request.url),
+              let scheme = targetURL.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            Logger.shared.log("[WebView] URL không hợp lệ: \(request.url)")
+            finishHTMLRequest(loadId: loadId, html: "")
+            return
+        }
+
+        // Phải add vào view hierarchy thì WKWebView mới chạy thực tế trên iOS.
+        if webView.superview == nil,
+           let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+           let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first {
+            window.addSubview(webView)
+        }
+
+        var urlRequest = URLRequest(url: targetURL)
+        urlRequest.setValue(resolvedDomain + "/", forHTTPHeaderField: "Referer")
+        activeNavigation = webView.load(urlRequest)
+
+        let path = targetURL.path.lowercased()
+        let isWatchLike = request.waitForIframe
+            || path.contains("xem-phim")
+            || path.contains("-tap-")
+            || path.contains("/tap-")
+        let retries = request.waitForIframe ? 16 : (isWatchLike ? 10 : 6)
+        checkDOM(webView: webView,
+                 loadId: loadId,
+                 retries: retries,
+                 waitForIframe: request.waitForIframe)
+    }
+
+    private func finishHTMLRequest(loadId: Int, html: String) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard loadId == currentLoadId, isLoadingHTML else { return }
+        let completion = activeHTMLCompletion
+        activeHTMLCompletion = nil
+        activeNavigation = nil
+        isLoadingHTML = false
+        completion?(html)
+        startNextHTMLRequestIfNeeded()
     }
     
     /// Lấy giá trị src của <video> hiện tại trong WKWebView. Dùng khi iframe player
     /// đã render và JWPlayer gắn data URL HLS lên <video> (không in ra outerHTML
     /// theo cách regex thông thường bắt được). Trả về chuỗi rỗng nếu không có.
     func fetchVideoSrc(completion: @escaping (String) -> Void) {
-        DispatchQueue.main.async {
+        let fetch = {
+            if !self.lastCapturedVideoSrc.isEmpty {
+                let captured = self.lastCapturedVideoSrc
+                self.lastCapturedVideoSrc = ""
+                completion(captured)
+                return
+            }
             let js = "(function(){var v=document.querySelector('video');return v?(v.src||v.getAttribute('src')||''):''})()"
             self.webView.evaluateJavaScript(js) { result, _ in
                 completion((result as? String) ?? "")
             }
+        }
+        if Thread.isMainThread {
+            fetch()
+        } else {
+            DispatchQueue.main.async(execute: fetch)
         }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Logger.shared.log("[WebView] didFinish: \(webView.url?.absoluteString ?? "nil")")
         syncCookiesToURLSession()
+    }
+
+    func webView(_ webView: WKWebView,
+                 didFailProvisionalNavigation navigation: WKNavigation!,
+                 withError error: Error) {
+        handleNavigationFailure(navigation: navigation, error: error)
+    }
+
+    func webView(_ webView: WKWebView,
+                 didFail navigation: WKNavigation!,
+                 withError error: Error) {
+        handleNavigationFailure(navigation: navigation, error: error)
+    }
+
+    private func handleNavigationFailure(navigation: WKNavigation?, error: Error) {
+        guard navigation === activeNavigation else { return }
+        let nsError = error as NSError
+        guard nsError.code != NSURLErrorCancelled else { return }
+        Logger.shared.log("[WebView] Điều hướng lỗi: \(nsError.localizedDescription) (\(nsError.code))")
+        if isLoadingHTML { finishHTMLRequest(loadId: currentLoadId, html: "") }
     }
 
     private func syncCookiesToURLSession() {
@@ -378,8 +485,9 @@ class NetworkManager: NSObject, WKNavigationDelegate {
 
         // Form encoding: dấu cách = '+', còn lại percent-encode. AVS dùng form key
         // `ajaxSearch=1&keysearch=<từ khoá>`.
+        let formAllowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._*"))
         let encoded = trimmed
-            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)?
+            .addingPercentEncoding(withAllowedCharacters: formAllowed)?
             .replacingOccurrences(of: "%20", with: "+") ?? trimmed
         let body = "ajaxSearch=1&keysearch=\(encoded)"
         req.httpBody = body.data(using: .utf8)
@@ -431,10 +539,10 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             guard let link = link, let title = title, !seen.contains(link) else { continue }
             seen.insert(link)
             result.append(Movie(
-                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                link: link,
-                thumbUrl: poster ?? "",
-                episodeStatus: (status ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                title: HTMLUtilities.plainText(fromHTML: title),
+                link: NetworkManager.shared.normalizeURL(link),
+                thumbUrl: poster.map(absoluteAssetURL) ?? "",
+                episodeStatus: HTMLUtilities.plainText(fromHTML: status ?? "")
             ))
         }
         return result
@@ -446,17 +554,90 @@ class NetworkManager: NSObject, WKNavigationDelegate {
               let r = Range(m.range(at: 1), in: html) else { return nil }
         return String(html[r])
     }
+
+    private static func absoluteAssetURL(_ raw: String) -> String {
+        let decoded = raw.replacingOccurrences(of: "&amp;", with: "&")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if decoded.hasPrefix("//") {
+            let scheme = URL(string: NetworkManager.shared.resolvedDomain)?.scheme ?? "https"
+            return "\(scheme):\(decoded)"
+        }
+        if let url = URL(string: decoded), url.scheme != nil { return url.absoluteString }
+        guard let base = URL(string: NetworkManager.shared.resolvedDomain + "/") else { return decoded }
+        return URL(string: decoded, relativeTo: base)?.absoluteURL.absoluteString ?? decoded
+    }
+
+    static func sortedEpisodes(_ episodes: [Episode]) -> [Episode] {
+        func number(in episode: Episode) -> Double? {
+            let source = episode.title + " " + episode.link
+            let pattern = "(?i)(?:tập|tap|episode|ep)[\\s._/-]*(\\d+(?:[.,]\\d+)?)"
+            guard let value = firstMatch(in: source, pattern: pattern)?.replacingOccurrences(of: ",", with: ".") else {
+                return nil
+            }
+            return Double(value)
+        }
+
+        let numbered = episodes.enumerated().compactMap { index, episode -> (Int, Episode, Double)? in
+            guard let value = number(in: episode) else { return nil }
+            return (index, episode, value)
+        }
+        guard numbered.count >= 2, numbered.count * 5 >= episodes.count * 4 else { return episodes }
+        // Repeated episode numbers usually mean the page contains multiple seasons
+        // or parts. Sorting only by episode number would interleave those groups.
+        guard Set(numbered.map { $0.2 }).count == numbered.count else { return episodes }
+        let values = Dictionary(uniqueKeysWithValues: numbered.map { ($0.0, $0.2) })
+        return episodes.enumerated().sorted { lhs, rhs in
+            switch (values[lhs.offset], values[rhs.offset]) {
+            case let (left?, right?):
+                return left == right ? lhs.offset < rhs.offset : left < right
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
+    }
+
+    func fetchGenres(completion: @escaping ([GenreOption]) -> Void) {
+        if let cached: [GenreOption] = DiskCache.shared.get("genres", ttl: 86_400, as: [GenreOption].self),
+           !cached.isEmpty {
+            completion(cached)
+            return
+        }
+        fetchHTML(url: resolvedDomain) { html in
+            let genres = Self.parseGenres(from: html)
+            if !genres.isEmpty { DiskCache.shared.set(genres, forKey: "genres") }
+            completion(genres)
+        }
+    }
+
+    static func parseGenres(from html: String) -> [GenreOption] {
+        let pattern = "(?i)<a[^>]+href=[\"'][^\"']*/the-loai/([^/\"']+)/?[\"'][^>]*>([\\s\\S]*?)</a>"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        var seen = Set<String>()
+        return regex.matches(in: html, range: NSRange(html.startIndex..., in: html)).compactMap { match in
+            guard let slugRange = Range(match.range(at: 1), in: html),
+                  let nameRange = Range(match.range(at: 2), in: html) else { return nil }
+            let slug = String(html[slugRange]).lowercased()
+            let name = HTMLUtilities.plainText(fromHTML: String(html[nameRange]))
+            guard !slug.isEmpty, !name.isEmpty, name.count <= 40, seen.insert(slug).inserted else { return nil }
+            return GenreOption(name: name, slug: slug)
+        }
+    }
     
     private func checkDOM(webView: WKWebView, loadId: Int, retries: Int, waitForIframe: Bool) {
         // Nếu đã có request mới đè lên, hủy vòng lặp này
-        if loadId != self.currentLoadId { return }
+        guard loadId == self.currentLoadId, isLoadingHTML else { return }
         
         if retries <= 0 {
             // Hết retry. Lấy HTML hiện tại (không phải rỗng) + diagnostic để Extractor
             // có thể log snippet quanh các keyword, biết tại sao JWPlayer không khởi động.
-            webView.evaluateJavaScript("document.documentElement.outerHTML") { [weak self] htmlResult, _ in
-                let html = (htmlResult as? String) ?? ""
+            let captureJS = "(function(){var v=document.querySelector('video');return {html:document.documentElement.outerHTML,videoSrc:v?(v.src||v.getAttribute('src')||''):''};})()"
+            webView.evaluateJavaScript(captureJS) { [weak self] pageResult, _ in
+                let page = pageResult as? [String: Any]
+                let html = (page?["html"] as? String) ?? ""
                 guard let self = self else { return }
+                guard loadId == self.currentLoadId, self.isLoadingHTML else { return }
+                self.lastCapturedVideoSrc = (page?["videoSrc"] as? String) ?? ""
                 Logger.shared.log("[checkDOM] Hết retry. HTML hiện tại dài \(html.count) ký tự.")
                 let diagJS = """
                 JSON.stringify({
@@ -481,18 +662,14 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     if let s = diagResult as? String {
                         Logger.shared.log("[checkDOM] Diagnostic: \(s)")
                     }
-                    let queue = self.completionQueue
-                    self.completionQueue.removeAll()
-                    for completion in queue {
-                        completion(html)
-                    }
+                    self.finishHTMLRequest(loadId: loadId, html: html)
                 }
             }
             return
         }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            if loadId != self.currentLoadId { return }
+            guard loadId == self.currentLoadId, self.isLoadingHTML else { return }
             
             let jsCheck = """
             (function() {
@@ -501,10 +678,10 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     // Stricter: phải có URL m3u8 thực sự trong dấu nháy hoặc dạng file:"..."
                     // chứ không chỉ là chuỗi con ".m3u8" (jwplayer init code có chữ này sẵn
                     // nên indexOf trả về true ngay lập tức trước khi luồng thực sự được fetch).
-                    if (/[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.m3u8/i.test(oh)) return true;
-                    if (/file\\s*:\\s*[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.m3u8/i.test(oh)) return true;
-                    // <video src="..m3u8..."> hoặc data URL HLS đã inject vào video element
-                    if (document.querySelector('video[src*=".m3u8"], source[src*=".m3u8"]')) return true;
+                    if (/[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.(m3u8|mp4)/i.test(oh)) return true;
+                    if (/file\\s*:\\s*[\"\\']https?:\\/\\/[^\"\\'\\s]+?\\.(m3u8|mp4)/i.test(oh)) return true;
+                    // <video src="..m3u8/mp4..."> hoặc data URL HLS đã inject vào video element
+                    if (document.querySelector('video[src*=".m3u8"], source[src*=".m3u8"], video[src*=".mp4"], source[src*=".mp4"]')) return true;
                     // Data URL HLS đã chèn vào video src (JWPlayer của AVS làm trò này sau khi
                     // anti-bot avs-shield.min.js / avs-fingerprint.min.js verify xong).
                     var v = document.querySelector('video');
@@ -523,6 +700,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     // ngay nhưng PLAYER_DATA mới là dữ liệu để bóc luồng phim).
                     return html.indexOf('PLAYER_DATA') !== -1
                         || html.indexOf('.m3u8') !== -1
+                        || html.indexOf('.mp4') !== -1
                         || html.indexOf('googleapiscdn') !== -1
                         || html.indexOf('streamlare') !== -1
                         || html.indexOf('hydrax') !== -1;
@@ -541,7 +719,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
 
                 var isInfo = html.indexOf('MovieInfo') !== -1 || html.indexOf('MvTbCn') !== -1;
 
-                return isHome || isInfo || html.indexOf('.m3u8') !== -1;
+                return isHome || isInfo || html.indexOf('.m3u8') !== -1 || html.indexOf('.mp4') !== -1;
             })();
             """
             
@@ -550,13 +728,13 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 guard let self = self else { return }
                 
                 if isReady {
-                    webView.evaluateJavaScript("document.documentElement.outerHTML") { htmlResult, _ in
-                        let html = (htmlResult as? String) ?? ""
-                        let queue = self.completionQueue
-                        self.completionQueue.removeAll()
-                        for completion in queue {
-                            completion(html)
-                        }
+                    let captureJS = "(function(){var v=document.querySelector('video');return {html:document.documentElement.outerHTML,videoSrc:v?(v.src||v.getAttribute('src')||''):''};})()"
+                    webView.evaluateJavaScript(captureJS) { pageResult, _ in
+                        guard loadId == self.currentLoadId, self.isLoadingHTML else { return }
+                        let page = pageResult as? [String: Any]
+                        let html = (page?["html"] as? String) ?? ""
+                        self.lastCapturedVideoSrc = (page?["videoSrc"] as? String) ?? ""
+                        self.finishHTMLRequest(loadId: loadId, html: html)
                     }
                 } else {
                     self.checkDOM(webView: webView, loadId: loadId, retries: retries - 1, waitForIframe: waitForIframe)
@@ -567,11 +745,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     
     func fetchHomeMovies(completion: @escaping ([Movie]) -> Void) {
         if let cached: [Movie] = DiskCache.shared.get("home", ttl: 1800, as: [Movie].self), !cached.isEmpty {
-            Logger.shared.log("[fetchHomeMovies] CACHE HIT (\(cached.count) phim) — trả ngay + refresh nền")
+            Logger.shared.log("[fetchHomeMovies] CACHE HIT (\(cached.count) phim)")
             completion(cached)
-            fetchHomePlusLatest { fresh in
-                if !fresh.isEmpty { DiskCache.shared.set(fresh, forKey: "home") }
-            }
             return
         }
         fetchHomePlusLatest { movies in
@@ -592,6 +767,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         var page2Movies: [Movie] = []
 
         fetchHTML(url: resolvedDomain) { [weak self] html in
+            let genres = Self.parseGenres(from: html)
+            if !genres.isEmpty { DiskCache.shared.set(genres, forKey: "genres") }
             self?.parseMovies(html: html) { movies in
                 homeMovies = movies
                 guard let self = self else { return }
@@ -680,14 +857,14 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression, range: nil)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             }
-            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedTitle = HTMLUtilities.plainText(fromHTML: title)
             // Bỏ qua match rác (link điều hướng, anchor trống)
             if trimmedTitle.isEmpty || trimmedTitle.count > 200 || thumb.isEmpty { continue }
             seen.insert(link)
             result.append(Movie(
                 title: trimmedTitle,
-                link: link.hasPrefix("http") ? link : NetworkManager.shared.resolvedDomain + link,
-                thumbUrl: thumb,
+                link: normalizeURL(link),
+                thumbUrl: Self.absoluteAssetURL(thumb),
                 episodeStatus: ""
             ))
         }
@@ -728,10 +905,10 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             }
 
             result.append(Movie(
-                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                link: link.hasPrefix("http") ? link : NetworkManager.shared.resolvedDomain + link,
-                thumbUrl: thumbUrl,
-                episodeStatus: eps.trimmingCharacters(in: .whitespacesAndNewlines)
+                title: HTMLUtilities.plainText(fromHTML: title),
+                link: normalizeURL(link),
+                thumbUrl: Self.absoluteAssetURL(thumbUrl),
+                episodeStatus: HTMLUtilities.plainText(fromHTML: eps)
             ))
         }
         return result
@@ -757,52 +934,76 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
 
-    private static func parseDetails(from html: String) -> MovieDetails {
-        func match(_ pattern: String, group: Int = 1) -> String {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else { return "" }
-            let r = NSRange(html.startIndex..., in: html)
-            guard let m = regex.firstMatch(in: html, range: r),
-                  let range = Range(m.range(at: group), in: html) else { return "" }
+    static func parseDetails(from html: String) -> MovieDetails {
+        func rawMatch(_ pattern: String, group: Int = 1) -> String? {
+            guard let regex = try? NSRegularExpression(pattern: pattern,
+                                                       options: [.caseInsensitive, .dotMatchesLineSeparators]),
+                  let result = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+                  result.numberOfRanges > group,
+                  let range = Range(result.range(at: group), in: html) else { return nil }
             return String(html[range])
-                .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression, range: nil)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        var description = match("class=\"Description\">\\s*<p>(.+?)</p>")
-        if description.isEmpty {
-            description = match("<meta name=\"description\" content=\"([^\"]+)\"")
+        func match(_ pattern: String, group: Int = 1) -> String {
+            rawMatch(pattern, group: group)
+                .map { HTMLUtilities.plainText(fromHTML: $0) } ?? ""
         }
-        var year = match("class=\"Date\"[^>]*>([^<]+)")
+
+        func attribute(_ name: String, in tag: String) -> String? {
+            let escapedName = NSRegularExpression.escapedPattern(for: name)
+            let pattern = "(?i)\\b\(escapedName)\\s*=\\s*([\\\"'])(.*?)\\1"
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let result = regex.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)),
+                  let range = Range(result.range(at: 2), in: tag) else { return nil }
+            return HTMLUtilities.decodeEntities(String(tag[range]))
+        }
+
+        func metaContent(attribute key: String, value: String) -> String? {
+            guard let regex = try? NSRegularExpression(pattern: "(?i)<meta\\b[^>]*>") else { return nil }
+            for result in regex.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
+                guard let range = Range(result.range, in: html) else { continue }
+                let tag = String(html[range])
+                if attribute(key, in: tag)?.caseInsensitiveCompare(value) == .orderedSame,
+                   let content = attribute("content", in: tag), !content.isEmpty {
+                    return content
+                }
+            }
+            return nil
+        }
+
+        var description = match("class\\s*=\\s*[\"'][^\"']*\\bDescription\\b[^\"']*[\"'][^>]*>[\\s\\S]*?<p[^>]*>([\\s\\S]+?)</p>")
+        if description.isEmpty {
+            description = metaContent(attribute: "name", value: "description")
+                .map(HTMLUtilities.plainText) ?? ""
+        }
+        var year = match("class\\s*=\\s*[\"'][^\"']*\\bDate\\b[^\"']*[\"'][^>]*>([^<]+)")
+        if year.isEmpty {
+            year = match("\"datePublished\"\\s*:\\s*\"?((?:19|20)\\d{2})")
+        }
         if year.isEmpty {
             year = match("\\b(19|20)\\d{2}\\b", group: 0)
         }
-        var rating = match("class=\"post-ratings?\"[^>]*>([^<]+)")
+        var rating = match("class\\s*=\\s*[\"'][^\"']*\\bpost-ratings?\\b[^\"']*[\"'][^>]*>([^<]+)")
         if rating.isEmpty {
             rating = match("\"ratingValue\"\\s*:\\s*\"?([0-9.]+)")
         }
         var banner = ""
-        if let r = try? NSRegularExpression(pattern: "class=\"TPostBg[\\s\\S]*?<img[^>]+src=\"([^\"]+)\"", options: .caseInsensitive) {
-            if let m = r.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
-               let g = Range(m.range(at: 1), in: html) {
-                banner = String(html[g])
-            }
+        if let imageTag = rawMatch("class\\s*=\\s*[\"'][^\"']*\\bTPostBg\\b[^\"']*[\"'][^>]*>[\\s\\S]{0,4000}?(<img\\b[^>]*>)") {
+            banner = attribute("data-src", in: imageTag)
+                ?? attribute("src", in: imageTag)
+                ?? ""
         }
         if banner.isEmpty {
-            if let r = try? NSRegularExpression(pattern: "<meta property=\"og:image\" content=\"([^\"]+)\"", options: .caseInsensitive) {
-                if let m = r.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
-                   let g = Range(m.range(at: 1), in: html) {
-                    banner = String(html[g])
-                }
-            }
+            banner = metaContent(attribute: "property", value: "og:image") ?? ""
         }
 
         var genres: [String] = []
-        if let r = try? NSRegularExpression(pattern: "<a[^>]+href=\"[^\"]*?/the-loai/[^\"]+\"[^>]*>([^<]+)</a>", options: .caseInsensitive) {
+        if let r = try? NSRegularExpression(pattern: "<a[^>]+href\\s*=\\s*[\"'][^\"']*?/the-loai/[^\"']+[\"'][^>]*>([\\s\\S]*?)</a>", options: .caseInsensitive) {
             let ms = r.matches(in: html, range: NSRange(html.startIndex..., in: html))
             var seen = Set<String>()
             for m in ms {
                 if let g = Range(m.range(at: 1), in: html) {
-                    let name = String(html[g]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let name = HTMLUtilities.plainText(fromHTML: String(html[g]))
                     if !name.isEmpty && !seen.contains(name) && name.count < 30 {
                         seen.insert(name)
                         genres.append(name)
@@ -811,7 +1012,11 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             }
         }
 
-        return MovieDetails(description: description, year: year, rating: rating, bannerUrl: banner, genres: genres)
+        return MovieDetails(description: description,
+                            year: year,
+                            rating: rating,
+                            bannerUrl: banner.isEmpty ? "" : absoluteAssetURL(banner),
+                            genres: genres)
     }
 
     func fetchEpisodes(movieUrl: String, isRecursive: Bool = false, completion: @escaping ([Episode]) -> Void) {
@@ -837,7 +1042,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                           let titleRange = Range(match.range(at: 2), in: html) else { continue }
                     
                     let link = String(html[linkRange])
-                    let title = String(html[titleRange]).replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression, range: nil).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let title = HTMLUtilities.plainText(fromHTML: String(html[titleRange]))
                     
                     let lowerTitle = title.lowercased()
                     let lowerLink = link.lowercased()
@@ -866,6 +1071,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     uniqueEps.insert(ep, at: 0)
                 }
             }
+            uniqueEps = Self.sortedEpisodes(uniqueEps)
             
             if uniqueEps.count <= 4 && !isRecursive && !uniqueEps.isEmpty {
                 self.fetchEpisodes(movieUrl: uniqueEps[0].link, isRecursive: true) { innerEps in
@@ -874,6 +1080,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     for ep in innerEps where seenInner.insert(ep.link).inserted {
                         merged.append(ep)
                     }
+                    merged = Self.sortedEpisodes(merged)
                     if !merged.isEmpty { DiskCache.shared.set(merged, forKey: cacheKey) }
                     completion(merged)
                 }
