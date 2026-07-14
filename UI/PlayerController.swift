@@ -314,7 +314,9 @@ class PlayerController: UIViewController {
         }
 
         let player = AVPlayer(playerItem: item)
-        player.defaultRate = preferredPlaybackRate
+        if #available(iOS 16.0, *) {
+            player.defaultRate = preferredPlaybackRate
+        }
         let playerVC = AVPlayerViewController()
         playerVC.player = player
         playerVC.allowsPictureInPicturePlayback = true
@@ -376,7 +378,11 @@ class PlayerController: UIViewController {
                                              episodeURL: episodes[currentIndex].link)
         }
 
-        player.play()
+        if #available(iOS 16.0, *) {
+            player.play()
+        } else {
+            player.playImmediately(atRate: preferredPlaybackRate)
+        }
     }
 
     private func showFailure() {
@@ -606,7 +612,9 @@ class PlayerController: UIViewController {
             guard let self = self else { return }
             self.preferredPlaybackRate = speed
             let wasPlaying = (self.currentPlayer?.rate ?? 0) > 0
-            self.currentPlayer?.defaultRate = speed
+            if #available(iOS 16.0, *) {
+                self.currentPlayer?.defaultRate = speed
+            }
             if wasPlaying { self.currentPlayer?.rate = speed }
         }
         if #available(iOS 15.0, *), let sheet = picker.sheetPresentationController {
