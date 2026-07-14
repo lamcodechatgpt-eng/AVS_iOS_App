@@ -97,4 +97,19 @@ final class PlaybackStoreTests: XCTestCase {
         XCTAssertEqual(store.history().count, 1)
         XCTAssertEqual(store.history().first?.isCompleted, true)
     }
+
+    func testClearHistoryAlsoClearsEpisodeProgress() {
+        let movie = Movie(title: "Anime", link: "/phim/anime", thumbUrl: "", episodeStatus: "")
+        store.savePosition(120, duration: 600, for: "/xem-phim/anime-tap-1")
+        store.recordWatch(movie: movie,
+                          episodeIndex: 0,
+                          episodeTitle: "Tập 1",
+                          episodeURL: "/xem-phim/anime-tap-1")
+
+        store.clearHistory()
+
+        XCTAssertTrue(store.history().isEmpty)
+        XCTAssertNil(store.position(for: "/xem-phim/anime-tap-1"))
+        XCTAssertNil(store.progress(for: "/xem-phim/anime-tap-1"))
+    }
 }

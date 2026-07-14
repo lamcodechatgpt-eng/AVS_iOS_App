@@ -661,7 +661,9 @@ class PlayerController: UIViewController {
         pickerVC.episodes = episodes
         pickerVC.currentIndex = currentIndex
         pickerVC.onSelect = { [weak self] idx in
-            guard let self = self, idx != self.currentIndex else { return }
+            guard let self = self,
+                  self.episodes.indices.contains(idx),
+                  idx != self.currentIndex else { return }
             self.persistCurrentPosition()
             self.currentIndex = idx
             self.episodeUrl = self.episodes[idx].link

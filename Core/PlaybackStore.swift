@@ -118,6 +118,8 @@ final class PlaybackStore {
 
     func clearHistory() {
         defaults.removeObject(forKey: historyKey)
+        defaults.removeObject(forKey: positionKey)
+        defaults.removeObject(forKey: durationKey)
     }
 
     func markCompleted(movie: Movie) {

@@ -45,6 +45,16 @@ enum HTMLUtilities {
 }
 
 enum SearchUtilities {
+    /// Percent-encodes one `application/x-www-form-urlencoded` value. Restricting
+    /// the allow-list to ASCII is important: `CharacterSet.alphanumerics` also
+    /// contains Vietnamese letters, which some servers do not accept unescaped
+    /// in a form body.
+    static func formComponent(from value: String) -> String? {
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._*")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed)?
+            .replacingOccurrences(of: "%20", with: "+")
+    }
+
     /// Creates the path component expected by AnimeVietsub's `/tim-kiem/` route.
     /// Encoding each word separately keeps `+` as the word separator while making
     /// reserved characters such as `/`, `?` and `#` harmless inside the path.

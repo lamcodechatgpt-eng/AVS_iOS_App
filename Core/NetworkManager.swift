@@ -565,10 +565,10 @@ class NetworkManager: NSObject, WKNavigationDelegate {
 
         // Form encoding: dấu cách = '+', còn lại percent-encode. AVS dùng form key
         // `ajaxSearch=1&keysearch=<từ khoá>`.
-        let formAllowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._*"))
-        let encoded = trimmed
-            .addingPercentEncoding(withAllowedCharacters: formAllowed)?
-            .replacingOccurrences(of: "%20", with: "+") ?? trimmed
+        guard let encoded = SearchUtilities.formComponent(from: trimmed) else {
+            completion([])
+            return
+        }
         let body = "ajaxSearch=1&keysearch=\(encoded)"
         req.httpBody = body.data(using: .utf8)
 
@@ -596,7 +596,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     ///     <p>EPISODE STATUS</p>
     ///   </div>
     /// </li>
-    private static func parseSuggestions(html: String) -> [Movie] {
+    static func parseSuggestions(html: String) -> [Movie] {
         var result: [Movie] = []
         var seen = Set<String>()
         let liPattern = "<li[^>]*>([\\s\\S]*?)</li>"
@@ -608,13 +608,12 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             // Skip footer "Enter để tìm kiếm"
             if inner.contains("suggest-all") || inner.contains("ss-bottom") { continue }
 
-            let poster = firstMatch(in: inner, pattern: "background-image:\\s*url\\(['\"]?([^'\"\\)]+)['\"]?\\)")
-            let link = firstMatch(in: inner, pattern: "<a[^>]+href=\"([^\"]+)\"[^>]*class=\"thumb\"")
-                ?? firstMatch(in: inner, pattern: "<a[^>]+class=\"thumb\"[^>]*href=\"([^\"]+)\"")
-                ?? firstMatch(in: inner, pattern: "<a[^>]+class=\"ss-title\"[^>]*href=\"([^\"]+)\"")
-                ?? firstMatch(in: inner, pattern: "href=\"([^\"]*?/phim/[^\"]+)\"")
-            let title = firstMatch(in: inner, pattern: "<a[^>]+class=\"ss-title\"[^>]*>([^<]+)</a>")
-            let status = firstMatch(in: inner, pattern: "<p>([^<]+)</p>")
+            let poster = firstMatch(in: inner, pattern: "background-image:\\s*url\\(\\s*['\"]?([^'\"\\)]+)['\"]?\\s*\\)")
+            let link = firstMatch(in: inner, pattern: "<a(?=[^>]*class\\s*=\\s*['\"][^'\"]*\\bthumb\\b)[^>]*href\\s*=\\s*['\"]([^'\"]+)['\"]")
+                ?? firstMatch(in: inner, pattern: "<a(?=[^>]*class\\s*=\\s*['\"][^'\"]*\\bss-title\\b)[^>]*href\\s*=\\s*['\"]([^'\"]+)['\"]")
+                ?? firstMatch(in: inner, pattern: "href\\s*=\\s*['\"]([^'\"]*?/phim/[^'\"]+)['\"]")
+            let title = firstMatch(in: inner, pattern: "<a(?=[^>]*class\\s*=\\s*['\"][^'\"]*\\bss-title\\b)[^>]*>([\\s\\S]*?)</a>")
+            let status = firstMatch(in: inner, pattern: "<p[^>]*>([\\s\\S]*?)</p>")
 
             guard let link = link, let title = title, !seen.contains(link) else { continue }
             seen.insert(link)

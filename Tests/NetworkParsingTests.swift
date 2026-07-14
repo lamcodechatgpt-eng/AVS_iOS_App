@@ -29,6 +29,27 @@ final class NetworkParsingTests: XCTestCase {
         ))
     }
 
+    func testSuggestionsAcceptSingleQuotesReorderedAttributesAndNestedTitleMarkup() {
+        let html = """
+        <li>
+          <a data-id='1' href='/phim/frieren/' class='poster thumb featured'
+             style="background-image: url( 'https://cdn.example/frieren.jpg' )"></a>
+          <div class='ss-info'>
+            <a href='/phim/frieren/' data-kind='anime' class='link ss-title'><strong>Frieren</strong> &amp; Fern</a>
+            <p><span>Tập 12</span></p>
+          </div>
+        </li>
+        """
+
+        let result = NetworkManager.parseSuggestions(html: html)
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.first?.title, "Frieren & Fern")
+        XCTAssertEqual(result.first?.episodeStatus, "Tập 12")
+        XCTAssertEqual(result.first?.thumbUrl, "https://cdn.example/frieren.jpg")
+        XCTAssertTrue(result.first?.link.hasSuffix("/phim/frieren/") == true)
+    }
+
     func testHomeItemsKeepStableIdentityWithinEachSection() {
         let movie = Movie(title: "Anime", link: "https://example.test/phim/anime", thumbUrl: "", episodeStatus: "")
         XCTAssertEqual(HomeItem(movie: movie, progress: 0.2, namespace: "grid"),

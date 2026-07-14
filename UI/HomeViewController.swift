@@ -391,8 +391,9 @@ final class HomeViewController: UIViewController {
     // MARK: - Search
     private func setupSearch() {
         suggestionsVC.onSelect = { [weak self] movie in
-            self?.navigationItem.searchController?.isActive = false
-            self?.coordinator?.showDetail(for: movie)
+            self?.dismissSearchThen { [weak self] in
+                self?.coordinator?.showDetail(for: movie)
+            }
         }
         let sc = UISearchController(searchResultsController: suggestionsVC)
         sc.searchBar.delegate = self
@@ -403,6 +404,19 @@ final class HomeViewController: UIViewController {
         navigationItem.searchController = sc
         navigationItem.hidesSearchBarWhenScrolling = false
         definesPresentationContext = true
+    }
+
+    /// UIKit ignores or visually hides a navigation push when it happens during
+    /// the search controller's dismissal transition. Wait for that transition to
+    /// finish before opening a selected suggestion or rendering full results.
+    private func dismissSearchThen(_ completion: @escaping () -> Void) {
+        suggestWork?.cancel()
+        guard let searchController = navigationItem.searchController,
+              searchController.isActive else {
+            completion()
+            return
+        }
+        searchController.dismiss(animated: true, completion: completion)
     }
 
     // MARK: - Skeleton
@@ -517,6 +531,12 @@ extension HomeViewController: UISearchBarDelegate, UISearchResultsUpdating {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         guard let keyword = SearchUtilities.pathComponent(from: text) else { return }
+        dismissSearchThen { [weak self] in
+            self?.performFullSearch(keyword: keyword)
+        }
+    }
+
+    private func performFullSearch(keyword: String) {
         dataGeneration += 1
         let generation = dataGeneration
         isPaginationEnabled = false

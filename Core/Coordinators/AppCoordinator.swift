@@ -100,8 +100,12 @@ final class HomeCoordinator: Coordinator {
     }
 
     func showPlayer(episodeUrl: String, episodes: [Episode], index: Int, movie: Movie?) {
+        guard episodes.indices.contains(index) else {
+            Logger.shared.log("[HomeCoordinator] Bỏ qua yêu cầu mở tập có chỉ số không hợp lệ: \(index)/\(episodes.count)")
+            return
+        }
         let playerVC = PlayerController()
-        playerVC.episodeUrl = episodeUrl
+        playerVC.episodeUrl = episodes[index].link
         playerVC.episodes = episodes
         playerVC.currentIndex = index
         playerVC.movie = movie

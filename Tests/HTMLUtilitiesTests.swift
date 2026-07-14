@@ -17,4 +17,9 @@ final class HTMLUtilitiesTests: XCTestCase {
         XCTAssertEqual(SearchUtilities.pathComponent(from: "Fate/Zero #1?"), "fate%2Fzero+%231%3F")
         XCTAssertNil(SearchUtilities.pathComponent(from: " \n\t "))
     }
+
+    func testFormComponentPercentEncodesVietnameseAndReservedCharacters() {
+        XCTAssertEqual(SearchUtilities.formComponent(from: "Học viện & Anime"),
+                       "H%E1%BB%8Dc+vi%E1%BB%87n+%26+Anime")
+    }
 }
