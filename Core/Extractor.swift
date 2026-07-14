@@ -70,7 +70,7 @@ class Extractor {
                               isCancelled: @escaping () -> Bool = { false },
                               completion: @escaping (Stream?) -> Void) {
         // Dùng fetchHTML của NetworkManager (WKWebView) để bypass Cloudflare 403
-        NetworkManager.shared.fetchHTML(url: episodeUrl) { html in
+        NetworkManager.shared.fetchHTML(url: episodeUrl, isCancelled: isCancelled) { html in
             guard !isCancelled() else { return completion(nil) }
 
             if html.isEmpty {
@@ -160,7 +160,9 @@ class Extractor {
                                           isCancelled: @escaping () -> Bool,
                                           completion: @escaping (Stream?) -> Void) {
         // Trỏ NetworkManager fetch iframe URL thông qua WKWebView để bypass Cloudflare Bot Detection trên CDN
-        NetworkManager.shared.fetchHTML(url: iframeUrl, waitForIframe: true) { html in
+        NetworkManager.shared.fetchHTML(url: iframeUrl,
+                                        waitForIframe: true,
+                                        isCancelled: isCancelled) { html in
             guard !isCancelled() else { return completion(nil) }
             // Referer cần là origin (scheme + host), không phải full URL — server stream
             // thường so sánh prefix "https://stream.googleapiscdn.com/".

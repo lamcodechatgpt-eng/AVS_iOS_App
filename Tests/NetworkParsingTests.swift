@@ -2,6 +2,18 @@ import XCTest
 @testable import AVS_iOS_App
 
 final class NetworkParsingTests: XCTestCase {
+    func testCancelledHTMLRequestFinishesWithoutStartingNavigation() {
+        let completion = expectation(description: "cancelled request completion")
+
+        NetworkManager.shared.fetchHTML(url: "https://example.invalid/never-load",
+                                        isCancelled: { true }) { html in
+            XCTAssertTrue(html.isEmpty)
+            completion.fulfill()
+        }
+
+        wait(for: [completion], timeout: 1)
+    }
+
     func testHomeCombinationKeepsOrderAndRemovesDuplicates() {
         let home = Movie(title: "Home", link: "https://example.test/phim/home", thumbUrl: "", episodeStatus: "")
         let first = Movie(title: "Page 1", link: "https://example.test/phim/page-1", thumbUrl: "", episodeStatus: "")

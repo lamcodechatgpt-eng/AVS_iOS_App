@@ -65,11 +65,13 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     private struct HTMLRequest {
         let url: String
         let waitForIframe: Bool
+        let isCancelled: () -> Bool
         let completion: (String) -> Void
     }
 
     private var htmlRequestQueue: [HTMLRequest] = []
     private var activeHTMLCompletion: ((String) -> Void)?
+    private var activeHTMLCancellation: (() -> Bool)?
     private var isLoadingHTML = false
     private var currentLoadId: Int = 0
     private var lastCapturedVideoSrc = ""
@@ -332,10 +334,14 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
     
     // Tải HTML thông qua WKWebView để tự động bypass Cloudflare/Bot-check
-    func fetchHTML(url: String, waitForIframe: Bool = false, completion: @escaping (String) -> Void) {
+    func fetchHTML(url: String,
+                   waitForIframe: Bool = false,
+                   isCancelled: @escaping () -> Bool = { false },
+                   completion: @escaping (String) -> Void) {
         let enqueue = {
             let request = HTMLRequest(url: url,
                                       waitForIframe: waitForIframe,
+                                      isCancelled: isCancelled,
                                       completion: completion)
             let path = URL(string: url)?.path.lowercased() ?? ""
             let isPlaybackRequest = waitForIframe
@@ -361,11 +367,21 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     /// refresh nền, tìm kiếm và mở phim không hủy callback của nhau.
     private func startNextHTMLRequestIfNeeded() {
         dispatchPrecondition(condition: .onQueue(.main))
-        guard !isLoadingHTML, !htmlRequestQueue.isEmpty else { return }
+        guard !isLoadingHTML else { return }
+
+        // A player can enqueue another episode while an older one is waiting.
+        // Complete cancelled entries immediately instead of loading pages whose
+        // result can no longer be displayed.
+        while let cancelledIndex = htmlRequestQueue.firstIndex(where: { $0.isCancelled() }) {
+            let cancelled = htmlRequestQueue.remove(at: cancelledIndex)
+            cancelled.completion("")
+        }
+        guard !htmlRequestQueue.isEmpty else { return }
 
         let request = htmlRequestQueue.removeFirst()
         isLoadingHTML = true
         activeHTMLCompletion = request.completion
+        activeHTMLCancellation = request.isCancelled
         lastCapturedVideoSrc = ""
         currentLoadId += 1
         let loadId = currentLoadId
@@ -406,6 +422,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         guard loadId == currentLoadId, isLoadingHTML else { return }
         let completion = activeHTMLCompletion
         activeHTMLCompletion = nil
+        activeHTMLCancellation = nil
         activeNavigation = nil
         isLoadingHTML = false
         completion?(html)
@@ -682,7 +699,12 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             completion(cached)
             return
         }
-        fetchHTML(url: resolvedDomain) { html in
+        let requestedDomain = resolvedDomain
+        fetchHTML(url: requestedDomain) { html in
+            guard self.resolvedDomain == requestedDomain else {
+                completion([])
+                return
+            }
             let genres = Self.parseGenres(from: html)
             if !genres.isEmpty { DiskCache.shared.set(genres, forKey: "genres") }
             completion(genres)
@@ -706,6 +728,12 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     private func checkDOM(webView: WKWebView, loadId: Int, retries: Int, waitForIframe: Bool) {
         // Nếu đã có request mới đè lên, hủy vòng lặp này
         guard loadId == self.currentLoadId, isLoadingHTML else { return }
+        if activeHTMLCancellation?() == true {
+            Logger.shared.log("[WebView] Hủy request HTML đã lỗi thời")
+            webView.stopLoading()
+            finishHTMLRequest(loadId: loadId, html: "")
+            return
+        }
         
         if retries <= 0 {
             // Hết retry. Lấy HTML hiện tại (không phải rỗng) + diagnostic để Extractor
@@ -870,7 +898,9 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         let startedAt = Date()
         fetchListingHTML(url: domain) { [weak self] html in
             let genres = Self.parseGenres(from: html)
-            if !genres.isEmpty { DiskCache.shared.set(genres, forKey: "genres") }
+            if !genres.isEmpty, self?.resolvedDomain == domain {
+                DiskCache.shared.set(genres, forKey: "genres")
+            }
             self?.parseMovies(html: html) { movies in
                 guard let self = self else { completion(movies); return }
                 if !movies.isEmpty { onInitial(movies) }
