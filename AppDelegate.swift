@@ -3,17 +3,10 @@ import AVFoundation
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
-
-    var window: UIWindow?
-    private var appCoordinator: AppCoordinator?
-
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
 
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
         try? AVAudioSession.sharedInstance().setActive(true)
-
-        let window = UIWindow(frame: UIScreen.main.bounds)
-        self.window = window
 
         let appearance = UINavigationBarAppearance()
         appearance.configureWithTransparentBackground()
@@ -34,10 +27,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         if #available(iOS 15.0, *) {
             UITabBar.appearance().scrollEdgeAppearance = tabAppearance
         }
-
-        let coordinator = AppCoordinator(window: window)
-        self.appCoordinator = coordinator
-        coordinator.start()
 
         return true
     }

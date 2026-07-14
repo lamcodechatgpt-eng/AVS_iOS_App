@@ -19,6 +19,7 @@ targets:
       - path: UI
       - path: Assets.xcassets
       - path: AppDelegate.swift
+      - path: SceneDelegate.swift
   AVS_iOS_AppTests:
     type: bundle.unit-test
     platform: iOS
