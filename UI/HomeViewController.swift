@@ -354,8 +354,17 @@ final class HomeViewController: UIViewController {
             sheet.prefersGrabberVisible = true
         }
         vc.onApply = { [weak self] genres in
-            guard !genres.isEmpty else { return }
-            self?.loadMultipleGenres(genres)
+            guard let self = self else { return }
+            if genres.isEmpty {
+                // Applying an empty selection is an explicit request to clear
+                // the active genre filter and return to the home feed.
+                self.navigationItem.title = "AnimeVietsub"
+                self.currentPage = 2
+                self.hasMore = true
+                self.fetchData()
+            } else {
+                self.loadMultipleGenres(genres)
+            }
         }
         present(nav, animated: true)
     }
