@@ -63,6 +63,7 @@ class GenreSelectionViewController: UIViewController, UICollectionViewDataSource
             guard let self = self, !fetched.isEmpty else { return }
             self.genres = fetched
             self.selectedSlugs = self.selectedSlugs.intersection(Set(fetched.map(\.slug)))
+            self.updateApplyButton()
             self.collectionView.reloadData()
         }
     }
