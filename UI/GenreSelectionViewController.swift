@@ -20,6 +20,7 @@ class GenreSelectionViewController: UIViewController, UICollectionViewDataSource
     var onApply: (([GenreOption]) -> Void)?
     
     private var collectionView: UICollectionView!
+    private var applyButton: UIBarButtonItem!
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -38,7 +39,8 @@ class GenreSelectionViewController: UIViewController, UICollectionViewDataSource
         ])
 
         let applyBtn = UIBarButtonItem(title: "Áp Dụng", style: .done, target: self, action: #selector(applyTapped))
-        navigationItem.rightBarButtonItem = applyBtn
+        applyButton = applyBtn
+        navigationItem.rightBarButtonItem = applyButton
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Hủy", style: .plain, target: self, action: #selector(cancelTapped))
         
         let layout = UICollectionViewFlowLayout()
@@ -55,6 +57,7 @@ class GenreSelectionViewController: UIViewController, UICollectionViewDataSource
         collectionView.register(GenreCell.self, forCellWithReuseIdentifier: "GenreCell")
         collectionView.allowsMultipleSelection = true
         view.addSubview(collectionView)
+        updateApplyButton()
 
         NetworkManager.shared.fetchGenres { [weak self] fetched in
             guard let self = self, !fetched.isEmpty else { return }
@@ -74,6 +77,14 @@ class GenreSelectionViewController: UIViewController, UICollectionViewDataSource
     @objc private func cancelTapped() {
         dismiss(animated: true)
     }
+
+    private func updateApplyButton() {
+        let count = selectedSlugs.count
+        applyButton.title = count == 0 ? "Áp Dụng" : "Áp Dụng (\(count))"
+        applyButton.accessibilityLabel = count == 0
+            ? "Áp dụng bộ lọc"
+            : "Áp dụng \(count) thể loại"
+    }
     
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         return genres.count
@@ -92,10 +103,12 @@ class GenreSelectionViewController: UIViewController, UICollectionViewDataSource
     
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         selectedSlugs.insert(genres[indexPath.row].slug)
+        updateApplyButton()
     }
     
     func collectionView(_ collectionView: UICollectionView, didDeselectItemAt indexPath: IndexPath) {
         selectedSlugs.remove(genres[indexPath.row].slug)
+        updateApplyButton()
     }
 }
 
@@ -129,7 +142,7 @@ class GenreCell: UICollectionViewCell {
     override var isSelected: Bool {
         didSet {
             accessibilityTraits = isSelected ? [.button, .selected] : [.button]
-            UIView.animate(withDuration: 0.2) {
+            let update = {
                 if self.isSelected {
                     self.contentView.backgroundColor = UIColor.systemRed.withAlphaComponent(0.15)
                     self.contentView.layer.borderColor = UIColor.systemRed.cgColor
@@ -142,6 +155,8 @@ class GenreCell: UICollectionViewCell {
                     self.titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
                 }
             }
+            guard !UIAccessibility.isReduceMotionEnabled else { update(); return }
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .curveEaseOut], animations: update)
         }
     }
 }

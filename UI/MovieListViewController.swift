@@ -20,6 +20,13 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
             case .favorites: return "Chưa có phim yêu thích.\nMở 1 phim, bấm ❤️ để thêm."
             }
         }
+
+        var emptyIcon: String {
+            switch self {
+            case .history: return "clock.arrow.circlepath"
+            case .favorites: return "heart"
+            }
+        }
     }
 
     var source: Source = .history
@@ -28,6 +35,7 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
     private var movies: [Movie] = []
     private var historySubtitles: [Int: String] = [:]
     private let emptyLabel = UILabel()
+    private let emptyIcon = UIImageView()
     private var lastLayoutWidth: CGFloat = 0
 
     private let bgView = BackgroundView()
@@ -106,17 +114,29 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
 
     private func setupEmptyLabel() {
         emptyLabel.text = source.emptyText
-        emptyLabel.font = .systemFont(ofSize: 14)
+        emptyLabel.font = .preferredFont(forTextStyle: .body)
+        emptyLabel.adjustsFontForContentSizeCategory = true
         emptyLabel.textColor = .secondaryLabel
         emptyLabel.textAlignment = .center
         emptyLabel.numberOfLines = 0
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
+        emptyIcon.image = UIImage(systemName: source.emptyIcon,
+                                  withConfiguration: UIImage.SymbolConfiguration(pointSize: 42, weight: .light))
+        emptyIcon.tintColor = .accentDimmed
+        emptyIcon.contentMode = .scaleAspectFit
+        emptyIcon.translatesAutoresizingMaskIntoConstraints = false
+        emptyIcon.isAccessibilityElement = false
+        view.addSubview(emptyIcon)
         view.addSubview(emptyLabel)
         NSLayoutConstraint.activate([
             emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 26),
             emptyLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            emptyLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24)
+            emptyLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            emptyIcon.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            emptyIcon.bottomAnchor.constraint(equalTo: emptyLabel.topAnchor, constant: -16),
+            emptyIcon.widthAnchor.constraint(equalToConstant: 52),
+            emptyIcon.heightAnchor.constraint(equalTo: emptyIcon.widthAnchor)
         ])
     }
 
@@ -134,6 +154,7 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
         }
         collectionView.reloadData()
         emptyLabel.isHidden = !movies.isEmpty
+        emptyIcon.isHidden = !movies.isEmpty
     }
 
     @objc private func clearAll() {
