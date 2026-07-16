@@ -9,7 +9,7 @@ class MovieInfoViewController: UIViewController {
     private let bannerImage = UIImageView()
     private let titleLabel = UILabel()
     private let metaLabel = UILabel()
-    private let descLabel = UILabel()
+    private let descLabel = InsetLabel()
     private let genreStack = UIStackView()
     private let watchButton = UIButton(type: .system)
     private let favButton = UIButton(type: .system)
@@ -87,6 +87,7 @@ class MovieInfoViewController: UIViewController {
 
     private func setupViews() {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.showsVerticalScrollIndicator = false
         view.addSubview(scrollView)
 
         stack.axis = .vertical
@@ -101,6 +102,8 @@ class MovieInfoViewController: UIViewController {
         bannerImage.backgroundColor = .tertiarySystemFill
         bannerImage.translatesAutoresizingMaskIntoConstraints = false
         let bannerWrap = UIView()
+        bannerWrap.backgroundColor = .bgTertiary
+        bannerWrap.layer.cornerRadius = 22
         bannerWrap.clipsToBounds = true
         bannerWrap.addSubview(bannerImage)
         bannerHeightConstraint = bannerImage.heightAnchor.constraint(equalTo: bannerImage.widthAnchor, multiplier: 9.0/16.0)
@@ -113,14 +116,23 @@ class MovieInfoViewController: UIViewController {
         ])
 
         titleLabel.font = .systemFont(ofSize: 24, weight: .bold)
+        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.numberOfLines = 0
-        metaLabel.font = .systemFont(ofSize: 13)
+        metaLabel.font = .preferredFont(forTextStyle: .subheadline)
+        metaLabel.adjustsFontForContentSizeCategory = true
         metaLabel.textColor = .secondaryLabel
         metaLabel.numberOfLines = 1
+        metaLabel.backgroundColor = UIColor.secondarySystemFill.withAlphaComponent(0.7)
+        metaLabel.layer.cornerRadius = 10
+        metaLabel.clipsToBounds = true
 
-        descLabel.font = .systemFont(ofSize: 15)
-        descLabel.textColor = .label
+        descLabel.font = .preferredFont(forTextStyle: .body)
+        descLabel.adjustsFontForContentSizeCategory = true
+        descLabel.textColor = .textPrimary
         descLabel.numberOfLines = 0
+        descLabel.backgroundColor = UIColor.secondarySystemFill.withAlphaComponent(0.7)
+        descLabel.layer.cornerRadius = 16
+        descLabel.clipsToBounds = true
 
         genreStack.axis = .horizontal
         genreStack.spacing = 8
@@ -139,10 +151,14 @@ class MovieInfoViewController: UIViewController {
         ])
 
         watchButton.setTitle("▶  Xem từ đầu", for: .normal)
+        watchButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+        watchButton.accessibilityLabel = "Xem từ đầu"
         styleAccentButton(watchButton)
         watchButton.addTarget(self, action: #selector(watchFromBeginning), for: .touchUpInside)
 
         continueButton.setTitle("⏵ Đang tải...", for: .normal)
+        continueButton.setImage(UIImage(systemName: "arrow.clockwise"), for: .normal)
+        continueButton.accessibilityLabel = "Tiếp tục xem"
         styleAccentButton(continueButton, accent: false)
         continueButton.addTarget(self, action: #selector(continueWatching), for: .touchUpInside)
         continueButton.isHidden = true
@@ -155,7 +171,9 @@ class MovieInfoViewController: UIViewController {
         loader.startAnimating()
 
         let allEpisodesButton = UIButton(type: .system)
-        allEpisodesButton.setTitle("📺  Danh sách tập", for: .normal)
+        allEpisodesButton.setTitle("Danh sách tập", for: .normal)
+        allEpisodesButton.setImage(UIImage(systemName: "list.bullet.rectangle"), for: .normal)
+        allEpisodesButton.accessibilityLabel = "Danh sách tập"
         styleAccentButton(allEpisodesButton, accent: false)
         allEpisodesButton.addTarget(self, action: #selector(showAllEpisodes), for: .touchUpInside)
 
@@ -179,9 +197,12 @@ class MovieInfoViewController: UIViewController {
         btn.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
         btn.backgroundColor = accent ? .systemRed : .secondarySystemFill
         btn.setTitleColor(accent ? .white : .label, for: .normal)
+        btn.tintColor = accent ? .white : .accent
+        btn.semanticContentAttribute = .forceLeftToRight
         btn.layer.cornerRadius = 12
         btn.clipsToBounds = true
         btn.contentEdgeInsets = UIEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
+        btn.imageView?.contentMode = .scaleAspectFit
     }
 
     private func bindMovie() {
@@ -304,5 +325,28 @@ class MovieInfoViewController: UIViewController {
         playerVC.movie = movie
         playerVC.shouldResumePlayback = resume
         navigationController?.pushViewController(playerVC, animated: true)
+    }
+}
+
+private final class InsetLabel: UILabel {
+    var contentInsets = UIEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+
+    override var intrinsicContentSize: CGSize {
+        let size = super.intrinsicContentSize
+        return CGSize(width: size.width + contentInsets.left + contentInsets.right,
+                      height: size.height + contentInsets.top + contentInsets.bottom)
+    }
+
+    override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
+        let insetBounds = bounds.inset(by: contentInsets)
+        let textRect = super.textRect(forBounds: insetBounds, limitedToNumberOfLines: numberOfLines)
+        return CGRect(x: textRect.origin.x - contentInsets.left,
+                      y: textRect.origin.y - contentInsets.top,
+                      width: textRect.width + contentInsets.left + contentInsets.right,
+                      height: textRect.height + contentInsets.top + contentInsets.bottom)
+    }
+
+    override func drawText(in rect: CGRect) {
+        super.drawText(in: rect.inset(by: contentInsets))
     }
 }
