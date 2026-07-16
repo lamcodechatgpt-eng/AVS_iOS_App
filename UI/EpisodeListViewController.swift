@@ -154,7 +154,7 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
 
     func collectionView(_ cv: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
         let h = cv.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "Header", for: indexPath) as! SectionHeader
-        h.titleLabel.text = "📺 Danh sách tập (\(episodes.count) tập)"
+        h.configure(title: "Danh sách tập", detail: "\(episodes.count) tập")
         return h
     }
 
@@ -172,12 +172,17 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
 // MARK: - Episode Cell
 class EpisodeCell: UICollectionViewCell {
     private let label = UILabel()
+    private let statusIcon = UIImageView()
     private var isWatched = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.layer.cornerRadius = 10
         contentView.clipsToBounds = true
+
+        statusIcon.contentMode = .scaleAspectFit
+        statusIcon.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(statusIcon)
 
         label.font = .systemFont(ofSize: 14, weight: .semibold)
         label.textColor = .label
@@ -189,7 +194,11 @@ class EpisodeCell: UICollectionViewCell {
         contentView.addSubview(label)
 
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
+            statusIcon.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            statusIcon.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            statusIcon.widthAnchor.constraint(equalToConstant: 14),
+            statusIcon.heightAnchor.constraint(equalTo: statusIcon.widthAnchor),
+            label.leadingAnchor.constraint(equalTo: statusIcon.trailingAnchor, constant: 4),
             label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
             label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
         ])
@@ -207,11 +216,15 @@ class EpisodeCell: UICollectionViewCell {
             contentView.layer.borderWidth = 1
             contentView.layer.borderColor = UIColor.systemGreen.withAlphaComponent(0.3).cgColor
             label.textColor = .systemGreen
+            statusIcon.image = UIImage(systemName: "checkmark.circle.fill")
+            statusIcon.tintColor = .systemGreen
         } else {
             contentView.backgroundColor = .secondarySystemBackground
             contentView.layer.borderWidth = 1
             contentView.layer.borderColor = UIColor.separator.cgColor
             label.textColor = .label
+            statusIcon.image = UIImage(systemName: "play.circle")
+            statusIcon.tintColor = .secondaryLabel
         }
 
         let raw = episode.title.lowercased()
@@ -228,9 +241,11 @@ class EpisodeCell: UICollectionViewCell {
 
     override var isHighlighted: Bool {
         didSet {
-            UIView.animate(withDuration: 0.15) {
+            guard !UIAccessibility.isReduceMotionEnabled else { return }
+            UIView.animate(withDuration: 0.15, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
                 let base = self.isWatched ? UIColor.systemGreen.withAlphaComponent(0.1) : UIColor.secondarySystemBackground
                 self.contentView.backgroundColor = self.isHighlighted ? UIColor.systemFill : base
+                self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.96, y: 0.96) : .identity
             }
         }
     }
