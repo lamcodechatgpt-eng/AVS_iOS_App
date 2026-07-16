@@ -103,7 +103,7 @@ final class HomeViewController: UIViewController {
     }
 
     private func createLayout() -> UICollectionViewCompositionalLayout {
-        UICollectionViewCompositionalLayout { sectionIndex, environment in
+        let layout = UICollectionViewCompositionalLayout { sectionIndex, environment in
             let section = HomeSection(rawValue: sectionIndex) ?? .grid
             let width = environment.container.effectiveContentSize.width
 
@@ -116,6 +116,8 @@ final class HomeViewController: UIViewController {
                 return Self.gridSection(containerWidth: width)
             }
         }
+        layout.configuration.interSectionSpacing = 4
+        return layout
     }
 
     private static func heroSection(containerWidth: CGFloat) -> NSCollectionLayoutSection {
@@ -123,6 +125,7 @@ final class HomeViewController: UIViewController {
         let item = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .fractionalHeight(1)))
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(h)), subitems: [item])
         let section = NSCollectionLayoutSection(group: group)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 12, bottom: 2, trailing: 12)
         section.orthogonalScrollingBehavior = .paging
         return section
     }
@@ -189,9 +192,11 @@ final class HomeViewController: UIViewController {
             guard section != .hero else { return nil }
             let header = cv.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "Header", for: ip) as! SectionHeader
             if section == .continueWatching {
-                header.titleLabel.text = "⏵ Tiếp tục xem"
+                header.configure(title: "⏵ Tiếp tục xem",
+                                 detail: "\(self.continueWatching.count) phim")
             } else {
-                header.titleLabel.text = self.movies.isEmpty ? "Đang tải..." : "🔥 Mới cập nhật (\(self.movies.count))"
+                header.configure(title: self.movies.isEmpty ? "Đang tải..." : "🔥 Mới cập nhật",
+                                 detail: self.movies.isEmpty ? nil : "\(self.movies.count) phim")
             }
             return header
         }
@@ -590,28 +595,49 @@ final class HeroBannerCell: UICollectionViewCell {
     private let overlayGradient = CAGradientLayer()
     private let titleLabel = UILabel()
     private let genreLabel = UILabel()
+    private let playPill = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+    private let playLabel = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
+        imageView.backgroundColor = .bgTertiary
         imageView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.layer.cornerRadius = 22
+        contentView.clipsToBounds = true
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.24
+        layer.shadowRadius = 12
+        layer.shadowOffset = CGSize(width: 0, height: 7)
         contentView.addSubview(imageView)
 
         overlayGradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.85).cgColor]
         overlayGradient.locations = [0.4, 1.0]
         imageView.layer.addSublayer(overlayGradient)
 
-        titleLabel.font = .systemFont(ofSize: 24, weight: .bold)
+        titleLabel.font = .preferredFont(forTextStyle: .title2)
+        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = .white
         titleLabel.numberOfLines = 2
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
 
-        genreLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        genreLabel.font = .preferredFont(forTextStyle: .subheadline)
+        genreLabel.adjustsFontForContentSizeCategory = true
         genreLabel.textColor = UIColor.white.withAlphaComponent(0.8)
         genreLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(genreLabel)
+
+        playPill.layer.cornerRadius = 16
+        playPill.clipsToBounds = true
+        playPill.translatesAutoresizingMaskIntoConstraints = false
+        playLabel.text = "▶  Xem ngay"
+        playLabel.font = .systemFont(ofSize: 13, weight: .bold)
+        playLabel.textColor = .white
+        playLabel.translatesAutoresizingMaskIntoConstraints = false
+        playPill.contentView.addSubview(playLabel)
+        contentView.addSubview(playPill)
 
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
@@ -625,7 +651,14 @@ final class HeroBannerCell: UICollectionViewCell {
 
             genreLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             genreLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            genreLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -24)
+            genreLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -24),
+
+            playPill.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
+            playPill.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -14),
+            playLabel.leadingAnchor.constraint(equalTo: playPill.contentView.leadingAnchor, constant: 10),
+            playLabel.trailingAnchor.constraint(equalTo: playPill.contentView.trailingAnchor, constant: -10),
+            playLabel.topAnchor.constraint(equalTo: playPill.contentView.topAnchor, constant: 7),
+            playLabel.bottomAnchor.constraint(equalTo: playPill.contentView.bottomAnchor, constant: -7)
         ])
     }
 
@@ -634,6 +667,18 @@ final class HeroBannerCell: UICollectionViewCell {
     override func layoutSubviews() {
         super.layoutSubviews()
         overlayGradient.frame = imageView.bounds
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: contentView.layer.cornerRadius).cgPath
+    }
+
+    override var isHighlighted: Bool {
+        didSet { animateHighlight(isHighlighted) }
+    }
+
+    private func animateHighlight(_ highlighted: Bool) {
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        UIView.animate(withDuration: 0.14, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
+            self.transform = highlighted ? CGAffineTransform(scaleX: 0.975, y: 0.975) : .identity
+        }
     }
 
     override func prepareForReuse() {
@@ -659,20 +704,39 @@ final class HeroBannerCell: UICollectionViewCell {
 // MARK: - ContinueWatchingCell
 final class ContinueWatchingCell: UICollectionViewCell {
     private let imageView = UIImageView()
+    private let overlayGradient = CAGradientLayer()
     private let progressBar = UIView()
     private let progressTrack = UIView()
     private var progressWidthConstraint: NSLayoutConstraint!
+    private let titleLabel = UILabel()
+    private let progressLabel = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.layer.cornerRadius = 10
         contentView.clipsToBounds = true
+        contentView.backgroundColor = .bgTertiary
 
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.backgroundColor = .bgTertiary
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
+
+        overlayGradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.88).cgColor]
+        overlayGradient.locations = [0.35, 1.0]
+        imageView.layer.addSublayer(overlayGradient)
+
+        titleLabel.font = .systemFont(ofSize: 13, weight: .bold)
+        titleLabel.textColor = .white
+        titleLabel.numberOfLines = 2
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(titleLabel)
+
+        progressLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        progressLabel.textColor = UIColor.white.withAlphaComponent(0.78)
+        progressLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(progressLabel)
 
         progressTrack.backgroundColor = UIColor.white.withAlphaComponent(0.2)
         progressTrack.translatesAutoresizingMaskIntoConstraints = false
@@ -690,6 +754,13 @@ final class ContinueWatchingCell: UICollectionViewCell {
             imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 10),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10),
+            titleLabel.bottomAnchor.constraint(equalTo: progressLabel.topAnchor, constant: -3),
+            progressLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            progressLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            progressLabel.bottomAnchor.constraint(equalTo: progressTrack.topAnchor, constant: -8),
 
             progressTrack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             progressTrack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
@@ -709,6 +780,22 @@ final class ContinueWatchingCell: UICollectionViewCell {
         ImageLoader.shared.cancelLoad(for: imageView)
         imageView.image = nil
         imageView.tag = 0
+        titleLabel.text = nil
+        progressLabel.text = nil
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        overlayGradient.frame = imageView.bounds
+    }
+
+    override var isHighlighted: Bool {
+        didSet {
+            guard !UIAccessibility.isReduceMotionEnabled else { return }
+            UIView.animate(withDuration: 0.14, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
+                self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.96, y: 0.96) : .identity
+            }
+        }
     }
 
     func configure(with movie: Movie?, progress: Double) {
@@ -716,6 +803,8 @@ final class ContinueWatchingCell: UICollectionViewCell {
             ImageLoader.shared.load(url, into: imageView)
         }
         let ratio = min(max(progress, 0), 1)
+        titleLabel.text = movie?.title ?? "Phim đang xem"
+        progressLabel.text = "Đã xem \(Int((ratio * 100).rounded()))%"
         isAccessibilityElement = true
         accessibilityLabel = movie?.title ?? "Phim đang xem"
         accessibilityValue = "Đã xem \(Int((ratio * 100).rounded())) phần trăm"
@@ -729,18 +818,33 @@ final class ContinueWatchingCell: UICollectionViewCell {
 // MARK: - SectionHeader
 final class SectionHeader: UICollectionReusableView {
     let titleLabel = UILabel()
+    private let detailLabel = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         titleLabel.font = .systemFont(ofSize: 19, weight: .bold)
         titleLabel.textColor = .textPrimary
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.font = .preferredFont(forTextStyle: .caption1)
+        detailLabel.adjustsFontForContentSizeCategory = true
+        detailLabel.textColor = .textSecondary
+        detailLabel.textAlignment = .right
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
+        addSubview(detailLabel)
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: detailLabel.leadingAnchor, constant: -8),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            detailLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
+    }
+
+    func configure(title: String, detail: String?) {
+        titleLabel.text = title
+        detailLabel.text = detail
+        detailLabel.isHidden = detail == nil
     }
     required init?(coder: NSCoder) { fatalError() }
 }
@@ -836,6 +940,16 @@ class MovieCell: UICollectionViewCell {
     override var bounds: CGRect {
         didSet {
             layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: contentView.layer.cornerRadius).cgPath
+        }
+    }
+
+    override var isHighlighted: Bool {
+        didSet {
+            guard !UIAccessibility.isReduceMotionEnabled else { return }
+            UIView.animate(withDuration: 0.12, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
+                self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.96, y: 0.96) : .identity
+                self.layer.shadowOpacity = self.isHighlighted ? 0.08 : 0.2
+            }
         }
     }
 
