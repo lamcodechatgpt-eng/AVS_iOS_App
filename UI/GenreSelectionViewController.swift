@@ -64,7 +64,19 @@ class GenreSelectionViewController: UIViewController, UICollectionViewDataSource
             self.genres = fetched
             self.selectedSlugs = self.selectedSlugs.intersection(Set(fetched.map(\.slug)))
             self.updateApplyButton()
+            // `reloadData()` recreates cells, but it does not restore the
+            // collection view's selection model. Without this, a chip can look
+            // selected while the next tap is treated as a new selection instead
+            // of a deselection.
+            self.collectionView.indexPathsForSelectedItems?.forEach {
+                self.collectionView.deselectItem(at: $0, animated: false)
+            }
             self.collectionView.reloadData()
+            for (index, genre) in self.genres.enumerated() where self.selectedSlugs.contains(genre.slug) {
+                self.collectionView.selectItem(at: IndexPath(item: index, section: 0),
+                                               animated: false,
+                                               scrollPosition: [])
+            }
         }
     }
     
