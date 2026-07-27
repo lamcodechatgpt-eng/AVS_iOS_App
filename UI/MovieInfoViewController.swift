@@ -10,6 +10,7 @@ class MovieInfoViewController: UIViewController {
     private let titleLabel = UILabel()
     private let metaLabel = UILabel()
     private let descLabel = InsetLabel()
+    private let expandDescriptionButton = UIButton(type: .system)
     private let genreStack = UIStackView()
     private let watchButton = UIButton(type: .system)
     private let favButton = UIButton(type: .system)
@@ -19,6 +20,7 @@ class MovieInfoViewController: UIViewController {
     private var episodes: [Episode] = []
     private var details: MovieDetails?
     private var resumeEpisodeIndex: Int?
+    private var isDescriptionExpanded = false
 
     private let bgView = BackgroundView()
 
@@ -129,10 +131,21 @@ class MovieInfoViewController: UIViewController {
         descLabel.font = .preferredFont(forTextStyle: .body)
         descLabel.adjustsFontForContentSizeCategory = true
         descLabel.textColor = .textPrimary
-        descLabel.numberOfLines = 0
+        descLabel.numberOfLines = 4
         descLabel.backgroundColor = UIColor.secondarySystemFill.withAlphaComponent(0.7)
         descLabel.layer.cornerRadius = 16
         descLabel.clipsToBounds = true
+
+        expandDescriptionButton.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
+        expandDescriptionButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        expandDescriptionButton.tintColor = .accent
+        expandDescriptionButton.contentHorizontalAlignment = .leading
+        expandDescriptionButton.setTitle("Xem thêm", for: .normal)
+        expandDescriptionButton.setImage(UIImage(systemName: "chevron.down"), for: .normal)
+        expandDescriptionButton.semanticContentAttribute = .forceRightToLeft
+        expandDescriptionButton.accessibilityLabel = "Mở rộng mô tả"
+        expandDescriptionButton.addTarget(self, action: #selector(toggleDescription), for: .touchUpInside)
+        expandDescriptionButton.isHidden = true
 
         genreStack.axis = .horizontal
         genreStack.spacing = 8
@@ -177,7 +190,7 @@ class MovieInfoViewController: UIViewController {
         styleAccentButton(allEpisodesButton, accent: false)
         allEpisodesButton.addTarget(self, action: #selector(showAllEpisodes), for: .touchUpInside)
 
-        [bannerWrap, titleLabel, metaLabel, genreScroll, buttonsRow, allEpisodesButton, descLabel, loader].forEach { stack.addArrangedSubview($0) }
+        [bannerWrap, titleLabel, metaLabel, genreScroll, buttonsRow, allEpisodesButton, descLabel, expandDescriptionButton, loader].forEach { stack.addArrangedSubview($0) }
 
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -233,6 +246,10 @@ class MovieInfoViewController: UIViewController {
         metaLabel.text = metaParts.joined(separator: "  •  ")
 
         descLabel.text = d.description.isEmpty ? "(Chưa có mô tả)" : d.description
+        isDescriptionExpanded = false
+        descLabel.numberOfLines = 4
+        expandDescriptionButton.isHidden = d.description.count < 170
+        updateDescriptionButton()
 
         // Banner thật từ details nếu có.
         if !d.bannerUrl.isEmpty, let url = URL(string: d.bannerUrl) {
@@ -300,6 +317,28 @@ class MovieInfoViewController: UIViewController {
     @objc private func watchFromBeginning() {
         guard !episodes.isEmpty else { return }
         openPlayer(at: 0, resume: false)
+    }
+
+    @objc private func toggleDescription() {
+        isDescriptionExpanded.toggle()
+        descLabel.numberOfLines = isDescriptionExpanded ? 0 : 4
+        updateDescriptionButton()
+
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        UIView.animate(withDuration: 0.24,
+                       delay: 0,
+                       options: [.beginFromCurrentState, .curveEaseInOut]) {
+            self.view.layoutIfNeeded()
+        }
+    }
+
+    private func updateDescriptionButton() {
+        let title = isDescriptionExpanded ? "Thu gọn" : "Xem thêm"
+        let image = UIImage(systemName: isDescriptionExpanded ? "chevron.up" : "chevron.down")
+        expandDescriptionButton.setTitle(title, for: .normal)
+        expandDescriptionButton.setImage(image, for: .normal)
+        expandDescriptionButton.accessibilityLabel = isDescriptionExpanded ? "Thu gọn mô tả" : "Mở rộng mô tả"
+        expandDescriptionButton.accessibilityValue = isDescriptionExpanded ? "Đang mở rộng" : "Đang thu gọn"
     }
 
     @objc private func continueWatching() {
