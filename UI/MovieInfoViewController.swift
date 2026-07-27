@@ -53,25 +53,34 @@ class MovieInfoViewController: UIViewController {
 
     private func setupNavBar() {
         favButton.translatesAutoresizingMaskIntoConstraints = false
-        let barItem = UIBarButtonItem(image: UIImage(systemName: "heart"),
-                                      style: .plain,
-                                      target: self,
-                                      action: #selector(toggleFavorite))
-        barItem.accessibilityLabel = "Yêu thích"
-        navigationItem.rightBarButtonItem = barItem
+        favButton.widthAnchor.constraint(equalToConstant: 32).isActive = true
+        favButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        favButton.accessibilityLabel = "Yêu thích"
+        favButton.addTarget(self, action: #selector(toggleFavorite), for: .touchUpInside)
+        navigationItem.rightBarButtonItem = UIBarButtonItem(customView: favButton)
         refreshFavButton()
     }
 
     private func refreshFavButton() {
         let isFav = PlaybackStore.shared.isFavorite(movie)
         let img = UIImage(systemName: isFav ? "heart.fill" : "heart")
-        navigationItem.rightBarButtonItem?.image = img
-        navigationItem.rightBarButtonItem?.tintColor = isFav ? .systemRed : .label
+        favButton.setImage(img, for: .normal)
+        favButton.tintColor = isFav ? .systemRed : .label
+        favButton.accessibilityValue = isFav ? "Đã thêm vào yêu thích" : "Chưa thêm vào yêu thích"
     }
 
     @objc private func toggleFavorite() {
         _ = PlaybackStore.shared.toggleFavorite(movie)
         refreshFavButton()
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        favButton.transform = CGAffineTransform(scaleX: 0.72, y: 0.72)
+        UIView.animate(withDuration: 0.38,
+                       delay: 0,
+                       usingSpringWithDamping: 0.52,
+                       initialSpringVelocity: 0.8,
+                       options: [.allowUserInteraction, .beginFromCurrentState]) {
+            self.favButton.transform = .identity
+        }
     }
 
     private func setupBackground() {
