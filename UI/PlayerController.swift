@@ -829,43 +829,6 @@ final class EpisodePickerCell: UICollectionViewCell {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { episodes.count }
-
-    func collectionView(_ cv: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        let cell = cv.dequeueReusableCell(withReuseIdentifier: "Cell", for: indexPath) as! EpisodePickerCell
-        let isCurrent = indexPath.row == currentIndex
-        let ep = episodes[indexPath.row]
-        cell.configure(number: indexPath.row + 1, isCurrent: isCurrent, title: ep.title)
-        return cell
-    }
-
-    func collectionView(_ cv: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        onSelect?(indexPath.row)
-    }
-}
-
-final class EpisodePickerCell: UICollectionViewCell {
-    private let label = UILabel()
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        contentView.layer.cornerRadius = 10
-        contentView.clipsToBounds = true
-        label.font = .systemFont(ofSize: 13, weight: .semibold)
-        label.textAlignment = .center
-        label.adjustsFontSizeToFitWidth = true
-        label.minimumScaleFactor = 0.7
-        label.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
-            label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
-            label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
-        ])
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
     func configure(number: Int, isCurrent: Bool, title: String) {
         accessibilityLabel = title.isEmpty ? "Tập \(number)" : title
         accessibilityTraits = isCurrent ? [.button, .selected] : [.button]

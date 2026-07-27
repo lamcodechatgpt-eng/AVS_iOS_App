@@ -38,3 +38,5 @@ public struct VideoStreamSource: Sendable, Equatable {
         self.serverName = serverName
     }
 }
+
+public typealias StreamSource = VideoStreamSource
