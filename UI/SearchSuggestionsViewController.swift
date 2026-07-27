@@ -95,7 +95,7 @@ class SearchSuggestionsViewController: UIViewController, UITableViewDataSource, 
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "SugCell", for: indexPath) as! SuggestionCell
-        cell.configure(with: movies[indexPath.row])
+        cell.configure(with: movies[indexPath.row], highlightedQuery: lastQuery)
         return cell
     }
 
@@ -201,8 +201,8 @@ final class SuggestionCell: UITableViewCell {
         }
     }
 
-    func configure(with movie: Movie) {
-        titleLabel.text = movie.title
+    func configure(with movie: Movie, highlightedQuery: String = "") {
+        titleLabel.attributedText = Self.highlightedTitle(movie.title, query: highlightedQuery)
         statusLabel.text = movie.episodeStatus
         if let url = URL(string: movie.thumbUrl) {
             ImageLoader.shared.load(url, into: poster)
@@ -211,5 +211,28 @@ final class SuggestionCell: UITableViewCell {
         accessibilityLabel = movie.title
         accessibilityValue = movie.episodeStatus.isEmpty ? nil : movie.episodeStatus
         accessibilityTraits = .button
+    }
+
+    private static func highlightedTitle(_ title: String, query: String) -> NSAttributedString {
+        let baseFont = UIFont.preferredFont(forTextStyle: .headline)
+        let result = NSMutableAttributedString(string: title, attributes: [
+            .font: baseFont,
+            .foregroundColor: UIColor.label
+        ])
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return result }
+
+        let source = title as NSString
+        var searchStart = 0
+        let highlightFont = UIFont.systemFont(ofSize: baseFont.pointSize, weight: .bold)
+        while searchStart < source.length {
+            let range = source.range(of: trimmedQuery,
+                                     options: [.caseInsensitive, .diacriticInsensitive],
+                                     range: NSRange(location: searchStart, length: source.length - searchStart))
+            guard range.location != NSNotFound else { break }
+            result.addAttributes([.font: highlightFont, .foregroundColor: UIColor.accent], range: range)
+            searchStart = range.location + max(range.length, 1)
+        }
+        return result
     }
 }
