@@ -21,7 +21,7 @@ final class DefaultAnimeRepository: AnimeRepositoryProtocol {
 
     func fetchHomeMovies() async throws -> [Movie] {
         try await withCheckedThrowingContinuation { continuation in
-            networkManager.fetchMovies(page: 1) { movies in
+            networkManager.fetchMoviesPage(1) { movies in
                 continuation.resume(returning: movies)
             }
         }
@@ -29,7 +29,7 @@ final class DefaultAnimeRepository: AnimeRepositoryProtocol {
 
     func fetchMovieDetails(for link: String) async throws -> MovieDetails {
         try await withCheckedThrowingContinuation { continuation in
-            networkManager.fetchMovieDetails(url: link) { details in
+            networkManager.fetchMovieDetails(movieUrl: link) { details in
                 if let details = details {
                     continuation.resume(returning: details)
                 } else {
@@ -41,7 +41,7 @@ final class DefaultAnimeRepository: AnimeRepositoryProtocol {
 
     func fetchEpisodes(for link: String) async throws -> [Episode] {
         try await withCheckedThrowingContinuation { continuation in
-            networkManager.fetchEpisodes(url: link) { episodes in
+            networkManager.fetchEpisodes(movieUrl: link) { episodes in
                 continuation.resume(returning: episodes)
             }
         }
@@ -49,7 +49,7 @@ final class DefaultAnimeRepository: AnimeRepositoryProtocol {
 
     func searchAnime(query: String) async throws -> [Movie] {
         try await withCheckedThrowingContinuation { continuation in
-            networkManager.fetchSearchResults(query: query) { movies in
+            networkManager.fetchSearchSuggestions(keyword: query) { movies in
                 continuation.resume(returning: movies)
             }
         }
