@@ -2,6 +2,14 @@ import Foundation
 
 class Extractor {
 
+    /// Bóc tách luồng phát thông qua VideoExtractorRegistry Plugin Architecture
+    static func resolveStreamViaPlugin(url: String, referer: String) async throws -> StreamSource {
+        guard let extractor = VideoExtractorRegistry.shared.resolveExtractor(for: url) else {
+            throw ExtractorError.unsupportedServer
+        }
+        return try await extractor.extract(url: url, referer: referer)
+    }
+
     /// Giải mã HTML entity quan trọng cho URL.
     private static func htmlDecode(_ s: String) -> String {
         HTMLUtilities.decodeEntities(s)

@@ -14,6 +14,14 @@ class PlayerController: UIViewController {
     var movie: Movie?
     var shouldResumePlayback = true
 
+    private var diagTimer: Timer?
+    private var m3u8Loader: M3U8ResourceLoader?
+    private weak var currentPlayerItem: AVPlayerItem?
+    private var resolveGeneration = 0
+    private var preferredPlaybackRate: Float = 1.0
+    private var pendingExit = false
+    private var gestureHandler: PlayerGestureHandler?
+
     private var periodicTimeToken: Any?
     private var resumeStatusObservation: NSKeyValueObservation?
 
@@ -34,12 +42,6 @@ class PlayerController: UIViewController {
     private var accessLogObserver: NSObjectProtocol?
     private var errorLogObserver: NSObjectProtocol?
     private var endObserver: NSObjectProtocol?
-    private var diagTimer: Timer?
-    private var m3u8Loader: M3U8ResourceLoader?
-    private weak var currentPlayerItem: AVPlayerItem?
-    private var resolveGeneration = 0
-    private var preferredPlaybackRate: Float = 1.0
-    private var pendingExit = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -47,8 +49,15 @@ class PlayerController: UIViewController {
 
         setupLoadingUI()
         setupNavBarItems()
+        setupGestureHandler()
         updateEpisodeInfo()
         startResolve()
+    }
+
+    private func setupGestureHandler() {
+        let handler = PlayerGestureHandler(containerView: view)
+        handler.delegate = self
+        self.gestureHandler = handler
     }
 
     override func viewDidLayoutSubviews() {
@@ -820,6 +829,43 @@ final class EpisodePickerCell: UICollectionViewCell {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { episodes.count }
+
+    func collectionView(_ cv: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        let cell = cv.dequeueReusableCell(withReuseIdentifier: "Cell", for: indexPath) as! EpisodePickerCell
+        let isCurrent = indexPath.row == currentIndex
+        let ep = episodes[indexPath.row]
+        cell.configure(number: indexPath.row + 1, isCurrent: isCurrent, title: ep.title)
+        return cell
+    }
+
+    func collectionView(_ cv: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        onSelect?(indexPath.row)
+    }
+}
+
+final class EpisodePickerCell: UICollectionViewCell {
+    private let label = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentView.layer.cornerRadius = 10
+        contentView.clipsToBounds = true
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.textAlignment = .center
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.7
+        label.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
+            label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
+            label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
     func configure(number: Int, isCurrent: Bool, title: String) {
         accessibilityLabel = title.isEmpty ? "Tập \(number)" : title
         accessibilityTraits = isCurrent ? [.button, .selected] : [.button]
@@ -897,5 +943,26 @@ final class SpeedPickerViewController: UIViewController, UITableViewDataSource, 
         tableView.deselectRow(at: indexPath, animated: true)
         onSelect?(speeds[indexPath.row])
         dismiss(animated: true)
+    }
+}
+
+// MARK: - PlayerGestureHandlerDelegate
+extension PlayerController: PlayerGestureHandlerDelegate {
+    func didDoubleTapSeek(isForward: Bool) {
+        guard let player = currentPlayer else { return }
+        let currentSeconds = player.currentTime().seconds
+        guard currentSeconds.isFinite else { return }
+        let delta: Double = isForward ? 10.0 : -10.0
+        let newTime = max(0, currentSeconds + delta)
+        player.seek(to: CMTime(seconds: newTime, preferredTimescale: 600))
+        Logger.shared.log("[PlayerController] Gesture DoubleTapSeek: \(isForward ? "+10s" : "-10s") -> \(newTime)s")
+    }
+
+    func didChangeBrightness(level: CGFloat) {
+        Logger.shared.log("[PlayerController] Gesture Brightness: \(Int(level * 100))%")
+    }
+
+    func didChangeVolume(level: Float) {
+        Logger.shared.log("[PlayerController] Gesture Volume delta: \(level)")
     }
 }
