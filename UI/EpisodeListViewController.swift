@@ -8,6 +8,7 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
     private let loader = UIActivityIndicatorView(style: .large)
     private let emptyLabel = UILabel()
     private var lastLayoutWidth: CGFloat = 0
+    private var currentEpisodeIndex: Int?
 
     private let bgView = BackgroundView()
 
@@ -133,12 +134,35 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
         emptyLabel.isHidden = true
         if episodes.isEmpty { loader.startAnimating() }
         NetworkManager.shared.fetchEpisodes(movieUrl: movie.link) { [weak self] fetched in
-            self?.episodes = fetched
-            self?.loader.stopAnimating()
-            self?.collectionView.refreshControl?.endRefreshing()
-            self?.collectionView.reloadData()
-            self?.emptyLabel.isHidden = !fetched.isEmpty
+            guard let self = self else { return }
+            self.episodes = fetched
+            self.currentEpisodeIndex = self.findCurrentEpisodeIndex(in: fetched, movie: movie)
+            self.loader.stopAnimating()
+            self.collectionView.refreshControl?.endRefreshing()
+            self.collectionView.reloadData()
+            self.emptyLabel.isHidden = !fetched.isEmpty
+            if let index = self.currentEpisodeIndex, fetched.indices.contains(index) {
+                DispatchQueue.main.async {
+                    guard self.collectionView.numberOfItems(inSection: 0) > index else { return }
+                    self.collectionView.scrollToItem(at: IndexPath(item: index, section: 0),
+                                                     at: .centeredVertically,
+                                                     animated: false)
+                }
+            }
         }
+    }
+
+    private func findCurrentEpisodeIndex(in fetched: [Episode], movie: Movie) -> Int? {
+        guard let entry = PlaybackStore.shared.history().first(where: {
+            $0.movie.persistenceID == movie.persistenceID && $0.isCompleted != true
+        }) else { return nil }
+        if let url = entry.lastEpisodeURL {
+            let identifier = ContentIdentifier.make(from: url)
+            if let index = fetched.firstIndex(where: { $0.persistenceID == identifier }) {
+                return index
+            }
+        }
+        return fetched.indices.contains(entry.lastEpisodeIndex) ? entry.lastEpisodeIndex : nil
     }
 
     // MARK: - UICollectionViewDataSource
@@ -147,8 +171,12 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
     func collectionView(_ cv: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = cv.dequeueReusableCell(withReuseIdentifier: "EpisodeCell", for: indexPath) as! EpisodeCell
         let ep = episodes[indexPath.row]
-        let hasPosition = PlaybackStore.shared.position(for: ep.link) != nil
-        cell.configure(with: ep, number: indexPath.row + 1, watched: hasPosition)
+        let progress = PlaybackStore.shared.progress(for: ep.link) ?? 0
+        cell.configure(with: ep,
+                       number: indexPath.row + 1,
+                       watched: progress > 0,
+                       progress: progress,
+                       isCurrent: indexPath.row == currentEpisodeIndex)
         return cell
     }
 
@@ -173,12 +201,20 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
 class EpisodeCell: UICollectionViewCell {
     private let label = UILabel()
     private let statusIcon = UIImageView()
+    private let progressView = UIProgressView(progressViewStyle: .bar)
     private var isWatched = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.layer.cornerRadius = 10
         contentView.clipsToBounds = true
+
+        progressView.trackTintColor = .clear
+        progressView.progressTintColor = .systemGreen
+        progressView.layer.cornerRadius = 1.5
+        progressView.clipsToBounds = true
+        progressView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(progressView)
 
         statusIcon.contentMode = .scaleAspectFit
         statusIcon.translatesAutoresizingMaskIntoConstraints = false
@@ -200,17 +236,30 @@ class EpisodeCell: UICollectionViewCell {
             statusIcon.heightAnchor.constraint(equalTo: statusIcon.widthAnchor),
             label.leadingAnchor.constraint(equalTo: statusIcon.trailingAnchor, constant: 4),
             label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
-            label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+            label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            progressView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            progressView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            progressView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -3),
+            progressView.heightAnchor.constraint(equalToConstant: 3)
         ])
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(with episode: Episode, number: Int, watched: Bool = false) {
+    func configure(with episode: Episode,
+                   number: Int,
+                   watched: Bool = false,
+                   progress: Double = 0,
+                   isCurrent: Bool = false) {
         isWatched = watched
         accessibilityLabel = episode.title.isEmpty ? "Tập \(number)" : episode.title
-        accessibilityValue = watched ? "Đã xem một phần" : "Chưa xem"
+        accessibilityValue = watched
+            ? "Đã xem \(Int((min(max(progress, 0), 1) * 100).rounded())) phần trăm"
+            : "Chưa xem"
         accessibilityTraits = .button
+        progressView.progress = Float(min(max(progress, 0), 1))
+        progressView.isHidden = progress <= 0
+        accessibilityHint = isCurrent ? "Tập đang xem dở" : nil
         if watched {
             contentView.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.1)
             contentView.layer.borderWidth = 1
@@ -225,6 +274,12 @@ class EpisodeCell: UICollectionViewCell {
             label.textColor = .label
             statusIcon.image = UIImage(systemName: "play.circle")
             statusIcon.tintColor = .secondaryLabel
+        }
+
+        if isCurrent {
+            contentView.layer.borderWidth = 2
+            contentView.layer.borderColor = UIColor.accent.cgColor
+            accessibilityTraits.insert(.selected)
         }
 
         let raw = episode.title.lowercased()
