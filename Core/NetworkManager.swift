@@ -7,6 +7,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     
     private static let defaultDomain = "https://animevietsub.meme"
     private static let domainProbeDateKey = "AVS_LastDomainProbe"
+    private static let domainProbeSuccessKey = "AVS_LastDomainProbeSucceeded"
     private static let domainCandidates = [
         "https://animevietsub.meme",
         "https://animevietsub.mom",
@@ -44,6 +45,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             if UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") != cleaned {
                 UserDefaults.standard.set(cleaned, forKey: "AVS_ResolvedDomain")
                 UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.domainProbeDateKey)
+                UserDefaults.standard.set(true, forKey: Self.domainProbeSuccessKey)
                 DiskCache.shared.removeAll()
                 Logger.shared.log("Đã cập nhật domain mới: \(cleaned)")
             }
@@ -57,7 +59,9 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         let start = {
             let now = Date().timeIntervalSince1970
             let lastProbe = UserDefaults.standard.double(forKey: Self.domainProbeDateKey)
-            if !force, lastProbe > 0, now - lastProbe < 6 * 60 * 60 {
+            let lastProbeSucceeded = UserDefaults.standard.bool(forKey: Self.domainProbeSuccessKey)
+            let validCacheWindow = lastProbeSucceeded ? 6 * 60 * 60 : 10 * 60
+            if !force, lastProbe > 0, now - lastProbe < validCacheWindow {
                 completion(self.resolvedDomain)
                 return
             }
@@ -77,6 +81,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 request.timeoutInterval = 5
                 request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
                 request.setValue("vi-VN,vi;q=0.9,en;q=0.7", forHTTPHeaderField: "Accept-Language")
+                request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+                                 forHTTPHeaderField: "User-Agent")
                 URLSession.shared.dataTask(with: request) { data, response, error in
                     defer { group.leave() }
                     guard error == nil,
@@ -104,6 +110,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                     self.resolvedDomain = detected
                     Logger.shared.log("[Domain] Auto-selected \(detected)")
                 }
+                UserDefaults.standard.set(detected != nil, forKey: Self.domainProbeSuccessKey)
                 let result = self.resolvedDomain
                 let completions = self.domainProbeCompletions
                 self.domainProbeCompletions.removeAll()
@@ -973,11 +980,12 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     func fetchHomeMovies(completion: @escaping ([Movie]) -> Void) {
         autoDetectDomain { [weak self] _ in
             guard let self = self else { completion([]); return }
-            self.fetchHomeMoviesUsingCurrentDomain(completion: completion)
+            self.fetchHomeMoviesUsingCurrentDomain(completion: completion, allowDomainRecovery: true)
         }
     }
 
-    private func fetchHomeMoviesUsingCurrentDomain(completion: @escaping ([Movie]) -> Void) {
+    private func fetchHomeMoviesUsingCurrentDomain(completion: @escaping ([Movie]) -> Void,
+                                                   allowDomainRecovery: Bool) {
         var deliveredMovies: [Movie]?
         if let cached: (value: [Movie], age: TimeInterval) = DiskCache.shared.getWithAge("home", as: [Movie].self),
            !cached.value.isEmpty {
@@ -1001,6 +1009,14 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 completion(movies)
             }
         }) { movies in
+            if movies.isEmpty, allowDomainRecovery {
+                Logger.shared.log("[Domain] Trang chủ rỗng, thử dò lại domain")
+                self.autoDetectDomain(force: true) { [weak self] _ in
+                    self?.fetchHomeMoviesUsingCurrentDomain(completion: completion,
+                                                            allowDomainRecovery: false)
+                }
+                return
+            }
             if !movies.isEmpty, self.resolvedDomain == requestedDomain {
                 DiskCache.shared.set(movies, forKey: "home")
             }
