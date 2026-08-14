@@ -92,6 +92,14 @@ final class NetworkParsingTests: XCTestCase {
                        ["Tập 1", "Tập 2", "Tập 12"])
     }
 
+    func testEpisodeOwnershipRejectsLinkFromAnotherMovieComment() {
+        let movie = "https://example.test/phim/one-piece"
+        XCTAssertTrue(NetworkManager.episodeLinkBelongsToMovie(
+            "https://example.test/xem-phim/one-piece-tap-5", movieURL: movie))
+        XCTAssertFalse(NetworkManager.episodeLinkBelongsToMovie(
+            "https://example.test/xem-phim/naruto-tap-10", movieURL: movie))
+    }
+
     func testEpisodeSortingPreservesUnknownShortLists() {
         let episodes = [
             Episode(title: "OVA", link: "https://example.test/ova"),

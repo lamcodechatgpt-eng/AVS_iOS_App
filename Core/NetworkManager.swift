@@ -6,6 +6,18 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     static let shared = NetworkManager()
     
     private static let defaultDomain = "https://animevietsub.meme"
+    private static let domainProbeDateKey = "AVS_LastDomainProbe"
+    private static let domainCandidates = [
+        "https://animevietsub.meme",
+        "https://animevietsub.mom",
+        "https://animevietsub.baby",
+        "https://animevietsub.vip",
+        "https://animevietsub.io",
+        "https://animevietsub.site"
+    ]
+
+    private var domainProbeInFlight = false
+    private var domainProbeCompletions: [(String) -> Void] = []
 
     var resolvedDomain: String {
         get {
@@ -31,6 +43,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             }
             if UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") != cleaned {
                 UserDefaults.standard.set(cleaned, forKey: "AVS_ResolvedDomain")
+                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.domainProbeDateKey)
                 DiskCache.shared.removeAll()
                 Logger.shared.log("Đã cập nhật domain mới: \(cleaned)")
             }
@@ -38,6 +51,69 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
     
     /// Ép URL về đúng resolvedDomain hiện tại, dù link gốc chứa domain cũ.
+    /// Probe known aliases and keep the first one serving a real listing page.
+    /// The timestamp avoids probing every candidate on every app launch.
+    func autoDetectDomain(force: Bool = false, completion: @escaping (String) -> Void) {
+        let start = {
+            let now = Date().timeIntervalSince1970
+            let lastProbe = UserDefaults.standard.double(forKey: Self.domainProbeDateKey)
+            if !force, lastProbe > 0, now - lastProbe < 6 * 60 * 60 {
+                completion(self.resolvedDomain)
+                return
+            }
+
+            self.domainProbeCompletions.append(completion)
+            guard !self.domainProbeInFlight else { return }
+            self.domainProbeInFlight = true
+            UserDefaults.standard.set(now, forKey: Self.domainProbeDateKey)
+
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var selectedDomain: String?
+            for candidate in Self.domainCandidates {
+                guard let url = URL(string: candidate) else { continue }
+                group.enter()
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 5
+                request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
+                request.setValue("vi-VN,vi;q=0.9,en;q=0.7", forHTTPHeaderField: "Accept-Language")
+                URLSession.shared.dataTask(with: request) { data, response, error in
+                    defer { group.leave() }
+                    guard error == nil,
+                          let http = response as? HTTPURLResponse,
+                          let html = data.flatMap({ String(data: $0, encoding: .utf8) }),
+                          Self.isUsableListingHTML(html, statusCode: http.statusCode),
+                          let finalURL = http.url,
+                          let scheme = finalURL.scheme,
+                          let host = finalURL.host else { return }
+                    var components = URLComponents()
+                    components.scheme = scheme
+                    components.host = host
+                    components.port = finalURL.port
+                    guard let detected = components.url?.absoluteString else { return }
+                    lock.lock()
+                    if selectedDomain == nil { selectedDomain = detected }
+                    lock.unlock()
+                }.resume()
+            }
+            group.notify(queue: .main) {
+                lock.lock()
+                let detected = selectedDomain
+                lock.unlock()
+                if let detected = detected, detected != self.resolvedDomain {
+                    self.resolvedDomain = detected
+                    Logger.shared.log("[Domain] Auto-selected \(detected)")
+                }
+                let result = self.resolvedDomain
+                let completions = self.domainProbeCompletions
+                self.domainProbeCompletions.removeAll()
+                self.domainProbeInFlight = false
+                completions.forEach { $0(result) }
+            }
+        }
+        if Thread.isMainThread { start() } else { DispatchQueue.main.async(execute: start) }
+    }
+
     func normalizeURL(_ urlString: String) -> String {
         var raw = urlString.replacingOccurrences(of: "&amp;", with: "&")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -674,6 +750,39 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         return URL(string: decoded, relativeTo: base)?.absoluteURL.absoluteString ?? decoded
     }
 
+    /// Returns true only when an episode link belongs to the movie currently
+    /// being parsed. Comment sections often contain links to episodes from
+    /// other titles; accepting every `/tap-*` anchor mixes those episodes into
+    /// the current series.
+    static func episodeLinkBelongsToMovie(_ episodeLink: String, movieURL: String) -> Bool {
+        func meaningfulTokens(_ value: String) -> Set<String> {
+            let path = URL(string: value)?.path.lowercased() ?? value.lowercased()
+            let ignored: Set<String> = ["phim", "xem", "xem-phim", "tap", "episode", "ep", "anime"]
+            return Set(path
+                .split { !$0.isLetter && !$0.isNumber }
+                .map(String.init)
+                .filter { $0.count >= 3 && !ignored.contains($0) && $0.range(of: "^\\d+$", options: .regularExpression) == nil })
+        }
+
+        let movieTokens = meaningfulTokens(movieURL)
+        let episodeTokens = meaningfulTokens(episodeLink)
+        guard !movieTokens.isEmpty, !episodeTokens.isEmpty else { return true }
+        return !movieTokens.isDisjoint(with: episodeTokens)
+    }
+
+    private static func isEpisodeTitle(_ title: String, link: String) -> Bool {
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let episodeMarker = "(?i)(?:tập|tap|episode|ep)\\s*[-._:# ]*\\d+(?:[.,]\\d+)?"
+        if normalized.range(of: episodeMarker, options: .regularExpression) != nil {
+            return true
+        }
+        // Some templates render only "05" in the label. Allow that narrow
+        // form only when the URL itself is an episode URL and the label is
+        // short; arbitrary comment text containing a number stays rejected.
+        let episodeLink = link.range(of: "(?i)(?:[-_/](?:tap|episode|ep)[-_\\d])", options: .regularExpression) != nil
+        return episodeLink && normalized.range(of: "^\\d{1,4}$", options: .regularExpression) != nil
+    }
+
     static func sortedEpisodes(_ episodes: [Episode]) -> [Episode] {
         func number(in episode: Episode) -> Double? {
             let source = episode.title + " " + episode.link
@@ -862,6 +971,13 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
     
     func fetchHomeMovies(completion: @escaping ([Movie]) -> Void) {
+        autoDetectDomain { [weak self] _ in
+            guard let self = self else { completion([]); return }
+            self.fetchHomeMoviesUsingCurrentDomain(completion: completion)
+        }
+    }
+
+    private func fetchHomeMoviesUsingCurrentDomain(completion: @escaping ([Movie]) -> Void) {
         var deliveredMovies: [Movie]?
         if let cached: (value: [Movie], age: TimeInterval) = DiskCache.shared.getWithAge("home", as: [Movie].self),
            !cached.value.isEmpty {
@@ -1199,8 +1315,11 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                         || (title.rangeOfCharacter(from: .decimalDigits) != nil && title.count < 30)
                     guard isEpisodeTitle else { continue }
                     
+                    guard Self.episodeLinkBelongsToMovie(link, movieURL: normalizedUrl),
+                          Self.isEpisodeTitle(title, link: link) else { continue }
+
                     let fullLink = NetworkManager.shared.normalizeURL(link)
-                    if !episodes.contains(where: { $0.link == fullLink }) {
+                    if !episodes.contains(where: { ContentIdentifier.make(from: $0.link) == ContentIdentifier.make(from: fullLink) }) {
                         episodes.append(Episode(title: title, link: fullLink))
                     }
                 }
