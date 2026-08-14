@@ -60,7 +60,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             let now = Date().timeIntervalSince1970
             let lastProbe = UserDefaults.standard.double(forKey: Self.domainProbeDateKey)
             let lastProbeSucceeded = UserDefaults.standard.bool(forKey: Self.domainProbeSuccessKey)
-            let validCacheWindow = lastProbeSucceeded ? 6 * 60 * 60 : 10 * 60
+            let validCacheWindow: TimeInterval = lastProbeSucceeded ? 6 * 60 * 60 : 10 * 60
             if !force, lastProbe > 0, now - lastProbe < validCacheWindow {
                 completion(self.resolvedDomain)
                 return
