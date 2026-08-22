@@ -70,8 +70,8 @@ public class AniSkipManager {
             self.session = session
         } else {
             let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 10
-            config.timeoutIntervalForResource = 15
+            config.timeoutIntervalForRequest = 8
+            config.timeoutIntervalForResource = 12
             self.session = URLSession(configuration: config)
         }
     }
@@ -88,14 +88,14 @@ public class AniSkipManager {
             return
         }
         
-        // 2. Resolve MAL ID
+        // 2. Resolve MAL ID qua danh sách tên gợi ý
         resolveMalId(for: names) { [weak self] malId in
             guard let self = self, let malId = malId else {
                 completion(nil)
                 return
             }
             
-            // 3. Fetch AniSkip
+            // 3. Fetch AniSkip với MAL ID đã tìm được
             self.fetchAniSkip(malId: malId, episode: epNumber) { [weak self] result in
                 guard let self = self else { return }
                 
@@ -120,38 +120,54 @@ public class AniSkipManager {
     }
     
     private func resolveMalId(for names: [String], completion: @escaping (Int?) -> Void) {
-        if names.isEmpty {
+        guard !names.isEmpty else {
             completion(nil)
             return
         }
         
-        let firstTitle = names[0]
-        let cacheKey = "\(malIdCachePrefix)\(firstTitle.hashValue)"
-        
-        if let data = DiskCache.shared.data(for: cacheKey),
-           let id = try? JSONDecoder().decode(Int.self, from: data) {
-            completion(id)
-            return
+        // 1. Kiểm tra cache cho từng tên trước
+        for name in names {
+            let cacheKey = "\(malIdCachePrefix)\(name.hashValue)"
+            if let data = DiskCache.shared.data(for: cacheKey),
+               let id = try? JSONDecoder().decode(Int.self, from: data) {
+                completion(id)
+                return
+            }
         }
         
-        searchAniList(title: firstTitle) { [weak self] id in
-            guard let self = self else { return }
-            if let id = id {
-                if let data = try? JSONEncoder().encode(id) {
-                    DiskCache.shared.set(data, for: cacheKey)
-                }
-                completion(id)
-            } else {
-                self.searchJikan(title: firstTitle) { id2 in
-                    if let id2 = id2 {
-                        if let data = try? JSONEncoder().encode(id2) {
-                            DiskCache.shared.set(data, for: cacheKey)
+        // 2. Thử lần lượt các tên ứng viên cho đến khi tìm thấy ID
+        func searchCandidate(at index: Int) {
+            guard index < names.count else {
+                completion(nil)
+                return
+            }
+            let currentTitle = names[index]
+            let cacheKey = "\(malIdCachePrefix)\(currentTitle.hashValue)"
+            
+            searchAniList(title: currentTitle) { [weak self] id in
+                guard let self = self else { return }
+                if let id = id {
+                    if let data = try? JSONEncoder().encode(id) {
+                        DiskCache.shared.set(data, for: cacheKey)
+                    }
+                    completion(id)
+                } else {
+                    self.searchJikan(title: currentTitle) { [weak self] id2 in
+                        guard let self = self else { return }
+                        if let id2 = id2 {
+                            if let data = try? JSONEncoder().encode(id2) {
+                                DiskCache.shared.set(data, for: cacheKey)
+                            }
+                            completion(id2)
+                        } else {
+                            searchCandidate(at: index + 1)
                         }
                     }
-                    completion(id2)
                 }
             }
         }
+        
+        searchCandidate(at: 0)
     }
     
     // MARK: - Networking
@@ -293,19 +309,22 @@ public class AniSkipManager {
     
     public static func cleanTitle(_ title: String, url: String = "") -> [String] {
         var t = title.lowercased()
-        t = t.replacingOccurrences(of: "xem phim", with: "")
-             .replacingOccurrences(of: "phim", with: "")
-             .replacingOccurrences(of: "vietsub", with: "")
-             .replacingOccurrences(of: "fhd", with: "")
-             .replacingOccurrences(of: "hd", with: "")
-             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let tagsToRemove = [
+            "xem phim", "phim", "vietsub", "thuyết minh", "thuyet minh",
+            "fhd", "hd", "lồng tiếng", "long tieng", "trọn bộ", "tron bo",
+            "bản đẹp", "ban dep", "raw", "uncut", "bluray"
+        ]
+        for tag in tagsToRemove {
+            t = t.replacingOccurrences(of: tag, with: "")
+        }
+        t = t.trimmingCharacters(in: .whitespacesAndNewlines)
              
         t = t.replacingOccurrences(of: "^(?:tập|ep|episode)[\\s\\-_]*\\d+", with: "", options: .regularExpression)
              .replacingOccurrences(of: "(?:tập|ep|episode)[\\s\\-_]*\\d+.*$", with: "", options: .regularExpression)
              .trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // Remove text in parentheses but keep it as alternative
         var names = [String]()
+        // Remove text in parentheses but keep it as alternative
         if let start = t.firstIndex(of: "("), let end = t.firstIndex(of: ")"), start < end {
             let inside = String(t[t.index(after: start)..<end])
             let outside = String(t[..<start]) + String(t[t.index(after: end)...])
@@ -316,9 +335,70 @@ public class AniSkipManager {
             let alts = inside.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
             names.append(contentsOf: alts)
         } else {
-            names.append(t)
+            if !t.isEmpty {
+                names.append(t)
+            }
         }
         
-        return names.filter { $0.count > 2 }
+        // Generate season/part variations (Phần 2 -> Season 2, etc.)
+        var seasonVariants = [String]()
+        for name in names {
+            let s1 = name.replacingOccurrences(of: "(?i)(?:phần|mùa)\\s*(\\d+)", with: "Season $1", options: .regularExpression)
+            if s1 != name {
+                seasonVariants.append(s1.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            let s2 = name.replacingOccurrences(of: "(?i)(?:phần|mùa)\\s*(\\d+)", with: "$1", options: .regularExpression)
+            if s2 != name {
+                seasonVariants.append(s2.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        names.append(contentsOf: seasonVariants)
+        
+        // Extract romaji/English name from URL slug if available
+        if !url.isEmpty {
+            if let slug = extractSlugFromURL(url), !slug.isEmpty {
+                names.append(slug)
+            }
+        }
+        
+        // Deduplicate and filter
+        var seen = Set<String>()
+        var cleanedList = [String]()
+        for n in names {
+            let trimmed = n.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                           .trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.count >= 2 && !seen.contains(trimmed.lowercased()) {
+                seen.insert(trimmed.lowercased())
+                cleanedList.append(trimmed)
+            }
+        }
+        
+        // Sort so that ASCII / English / Romaji titles come first (higher match rate on AniList & MAL)
+        return cleanedList.sorted { a, b in
+            let aIsAscii = a.unicodeScalars.allSatisfy { $0.value <= 127 }
+            let bIsAscii = b.unicodeScalars.allSatisfy { $0.value <= 127 }
+            if aIsAscii != bIsAscii {
+                return aIsAscii && !bIsAscii
+            }
+            return a.count < b.count
+        }
+    }
+    
+    public static func extractSlugFromURL(_ urlString: String) -> String? {
+        guard let url = URL(string: urlString) else { return nil }
+        let segments = url.pathComponents.filter { $0 != "/" && !$0.isEmpty }
+        for seg in segments {
+            var s = seg.replacingOccurrences(of: ".html", with: "")
+            if s.hasPrefix("phim-") {
+                s = String(s.dropFirst(5))
+            }
+            // Remove trailing ID like -a5123 or -12345
+            s = s.replacingOccurrences(of: "-[a-z]?\\d+$", with: "", options: .regularExpression)
+            let ignored: Set<String> = ["phim", "xem-phim", "tap", "episode", "the-loai"]
+            if !ignored.contains(s) && s.count >= 3 {
+                return s.replacingOccurrences(of: "-", with: " ")
+            }
+        }
+        return nil
     }
 }

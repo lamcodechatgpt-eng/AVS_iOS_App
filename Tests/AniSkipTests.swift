@@ -28,6 +28,32 @@ final class AniSkipTests: XCTestCase {
         XCTAssertTrue(names.contains("kimetsu no yaiba"))
     }
 
+    func testExtractSlugFromURL() {
+        let url1 = "https://animevietsub.meme/phim/jujutsu-kaisen-season-2-a4812/"
+        XCTAssertEqual(AniSkipManager.extractSlugFromURL(url1), "jujutsu kaisen season 2")
+
+        let url2 = "https://animevietsub.mom/phim/kimetsu-no-yaiba-hashira-geiko-hen-a5214/xem-phim.html"
+        XCTAssertEqual(AniSkipManager.extractSlugFromURL(url2), "kimetsu no yaiba hashira geiko hen")
+    }
+
+    func testCleanTitleWithVietnameseOnlyAndURLFallback() {
+        let title = "Thanh Gươm Diệt Quỷ: Đại Trụ Huấn Luyện"
+        let url = "https://animevietsub.meme/phim/kimetsu-no-yaiba-hashira-geiko-hen-a5214/"
+        let names = AniSkipManager.cleanTitle(title, url: url)
+
+        XCTAssertTrue(names.contains("kimetsu no yaiba hashira geiko hen"))
+        // ASCII / Romaji title should be prioritized first for accurate AniList/MAL matching
+        XCTAssertEqual(names.first, "kimetsu no yaiba hashira geiko hen")
+    }
+
+    func testCleanTitleSeasonVariations() {
+        let title = "Jujutsu Kaisen Phần 2 (Chú Thuật Hồi Chiến Mùa 2)"
+        let names = AniSkipManager.cleanTitle(title)
+
+        XCTAssertTrue(names.contains("jujutsu kaisen Season 2"))
+        XCTAssertTrue(names.contains("jujutsu kaisen 2"))
+    }
+
     func testAniSkipResultSerialization() throws {
         let intro = SkipInterval(start: 90.0, end: 180.0, episodeLength: 1440.0)
         let outro = SkipInterval(start: 1300.0, end: 1420.0, episodeLength: 1440.0)
