@@ -148,4 +148,39 @@ final class NetworkParsingTests: XCTestCase {
         XCTAssertEqual(details.bannerUrl, "https://cdn.example/banner.jpg")
         XCTAssertEqual(details.genres, ["School", "Comedy"])
     }
+
+    func testContainerPriorityEpisodeParsing() {
+        let html = """
+        <div class="sidebar">
+            <a href="/phim/other-anime-tap-1.html">Phim khác Tập 1</a>
+        </div>
+        <div class="halim-list-eps">
+            <a href="/phim/solo-leveling/tap-1.html" class="halim-btn">Tập 01</a>
+            <a href="/phim/solo-leveling/tap-2.html" class="halim-btn">02</a>
+            <a href="/phim/solo-leveling/tap-3.html" class="halim-btn">Tập 3 - FHD</a>
+        </div>
+        <div class="comments">
+            <a href="/phim/random/tap-99.html">Xem thử tập 99 phim kia đi</a>
+        </div>
+        """
+
+        let episodes = NetworkManager.parseEpisodes(from: html, movieURL: "https://animevietsub.meme/phim/solo-leveling")
+        XCTAssertEqual(episodes.count, 3)
+        XCTAssertEqual(episodes[0].title, "Tập 01")
+        XCTAssertEqual(episodes[1].title, "Tập 02")
+        XCTAssertEqual(episodes[2].title, "Tập 3 - FHD")
+    }
+
+    func testEpisodeSortingWithSpecialEpisodes() {
+        let episodes = [
+            Episode(title: "Tập 2", link: "https://example.test/tap-2"),
+            Episode(title: "OVA 1", link: "https://example.test/ova-1"),
+            Episode(title: "Tập 1", link: "https://example.test/tap-1"),
+            Episode(title: "Tập Full", link: "https://example.test/full")
+        ]
+
+        let sorted = NetworkManager.sortedEpisodes(episodes)
+        XCTAssertEqual(sorted.map(\.title), ["Tập Full", "Tập 1", "Tập 2", "OVA 1"])
+    }
 }
+

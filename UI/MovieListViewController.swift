@@ -38,12 +38,10 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
     private let emptyIcon = UIImageView()
     private var lastLayoutWidth: CGFloat = 0
 
-    private let bgView = BackgroundView()
-
     override func viewDidLoad() {
         super.viewDidLoad()
         title = source.title
-        setupBackground()
+        view.backgroundColor = AppTheme.backgroundDark
         setupCollection()
         setupEmptyLabel()
         if source == .history {
@@ -68,19 +66,6 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
         guard abs(width - lastLayoutWidth) > 0.5 else { return }
         lastLayoutWidth = width
         updateCollectionLayout(for: width)
-    }
-
-    private func setupBackground() {
-        bgView.setStyle(.accent)
-        bgView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(bgView)
-        view.sendSubviewToBack(bgView)
-        NSLayoutConstraint.activate([
-            bgView.topAnchor.constraint(equalTo: view.topAnchor),
-            bgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            bgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bgView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
     }
 
     private func setupCollection() {
@@ -114,15 +99,15 @@ class MovieListViewController: UIViewController, UICollectionViewDataSource, UIC
 
     private func setupEmptyLabel() {
         emptyLabel.text = source.emptyText
-        emptyLabel.font = .preferredFont(forTextStyle: .body)
+        emptyLabel.font = AppTheme.Fonts.body(size: 15)
         emptyLabel.adjustsFontForContentSizeCategory = true
-        emptyLabel.textColor = .secondaryLabel
+        emptyLabel.textColor = AppTheme.textSecondary
         emptyLabel.textAlignment = .center
         emptyLabel.numberOfLines = 0
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         emptyIcon.image = UIImage(systemName: source.emptyIcon,
                                   withConfiguration: UIImage.SymbolConfiguration(pointSize: 42, weight: .light))
-        emptyIcon.tintColor = .accentDimmed
+        emptyIcon.tintColor = AppTheme.surfaceGlass
         emptyIcon.contentMode = .scaleAspectFit
         emptyIcon.translatesAutoresizingMaskIntoConstraints = false
         emptyIcon.isAccessibilityElement = false

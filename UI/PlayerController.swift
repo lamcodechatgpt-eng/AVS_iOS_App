@@ -32,6 +32,22 @@ class PlayerController: UIViewController {
     private let logTextView = UITextView()
     private let copyButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
+    
+    // Auto-Skip properties
+    private var aniSkipResult: AniSkipResult?
+    private let skipButton = UIButton(type: .system)
+    private let skipToastLabel = UILabel()
+    private var currentSkipTarget: Double?
+    private var lastIntroSkip: Double = -1
+    private var lastOutroSkip: Double = -1
+    private var isAutoSkipIntro: Bool {
+        if UserDefaults.standard.object(forKey: "auto_skip_intro") == nil { return true }
+        return UserDefaults.standard.bool(forKey: "auto_skip_intro")
+    }
+    private var isAutoSkipOutro: Bool {
+        if UserDefaults.standard.object(forKey: "auto_skip_outro") == nil { return true }
+        return UserDefaults.standard.bool(forKey: "auto_skip_outro")
+    }
 
     private weak var currentPlayer: AVPlayer?
     private weak var currentPlayerVC: AVPlayerViewController?
@@ -48,6 +64,7 @@ class PlayerController: UIViewController {
         view.backgroundColor = .black
 
         setupLoadingUI()
+        setupSkipUI()
         setupNavBarItems()
         setupGestureHandler()
         updateEpisodeInfo()
@@ -184,6 +201,18 @@ class PlayerController: UIViewController {
             self.showFailure()
             return
         }
+        
+        // Fetch Skip Times
+        let title = movie?.title ?? ""
+        let epTitle = episodes[currentIndex].title
+        AniSkipManager.shared.resolveTimestamps(movieTitle: title, movieUrl: episodeUrl, episodeText: epTitle) { [weak self] result in
+            DispatchQueue.main.async {
+                self?.aniSkipResult = result
+                self?.lastIntroSkip = -1
+                self?.lastOutroSkip = -1
+            }
+        }
+        
         Extractor.resolveStream(episodeUrl: episodeUrl, isCancelled: { [weak self] in
             guard let self = self else { return true }
             return generation != self.resolveGeneration || episodeUrl != self.episodeUrl
@@ -209,6 +238,131 @@ class PlayerController: UIViewController {
                 self.statusLabel.text = "Đang khởi động player..."
                 self.attachPlayer(for: stream)
             }
+        }
+    }
+    
+    private func setupSkipUI() {
+        skipButton.translatesAutoresizingMaskIntoConstraints = false
+        skipButton.backgroundColor = AppTheme.primaryAccent.withAlphaComponent(0.9)
+        skipButton.setTitleColor(.white, for: .normal)
+        skipButton.titleLabel?.font = AppTheme.Fonts.subhead(size: 15)
+        skipButton.layer.cornerRadius = 10
+        skipButton.layer.borderWidth = 1
+        skipButton.layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
+        skipButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        skipButton.isHidden = true
+        skipButton.addTarget(self, action: #selector(performSkip), for: .touchUpInside)
+        view.addSubview(skipButton)
+
+        skipToastLabel.translatesAutoresizingMaskIntoConstraints = false
+        skipToastLabel.backgroundColor = AppTheme.cardBackground.withAlphaComponent(0.92)
+        skipToastLabel.textColor = AppTheme.textPrimary
+        skipToastLabel.font = AppTheme.Fonts.subhead(size: 14)
+        skipToastLabel.layer.cornerRadius = 10
+        skipToastLabel.layer.borderWidth = 1
+        skipToastLabel.layer.borderColor = AppTheme.surfaceGlass.cgColor
+        skipToastLabel.clipsToBounds = true
+        skipToastLabel.textAlignment = .center
+        skipToastLabel.isHidden = true
+        view.addSubview(skipToastLabel)
+
+        NSLayoutConstraint.activate([
+            skipButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -60),
+            skipButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            skipButton.heightAnchor.constraint(equalToConstant: 42),
+            skipButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
+            
+            skipToastLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            skipToastLabel.bottomAnchor.constraint(equalTo: view.centerYAnchor, constant: 120),
+            skipToastLabel.heightAnchor.constraint(equalToConstant: 40),
+            skipToastLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)
+        ])
+    }
+    
+    private func checkSkip(currentTime: Double) {
+        guard let duration = currentPlayerItem?.duration.seconds, duration.isFinite else { return }
+        
+        var showType: String?
+        var targetTime: Double?
+        
+        // Check Intro
+        if let intro = aniSkipResult?.intro {
+            let s = max(0, intro.start)
+            let e = intro.end
+            if currentTime >= s - 0.2 && currentTime < e - 0.3 {
+                if isAutoSkipIntro {
+                    if abs(currentTime - lastIntroSkip) > 1.5 {
+                        lastIntroSkip = currentTime
+                        currentPlayer?.seek(to: CMTime(seconds: e, preferredTimescale: 600))
+                        showSkipToast(message: "Đã tự động bỏ qua Intro")
+                        return
+                    }
+                } else {
+                    showType = "Bỏ qua Intro ⏵"
+                    targetTime = e
+                }
+            }
+        }
+        
+        // Check Outro
+        if let outro = aniSkipResult?.outro {
+            var s = outro.start
+            var e = (outro.end > s && outro.end.isFinite) ? outro.end : duration
+            
+            if aniSkipResult?.isEstimated == true, let epLen = outro.episodeLength, duration > 0 {
+                let offsetStart = epLen - outro.start
+                s = duration - offsetStart
+                if outro.end.isFinite {
+                    let offsetEnd = epLen - outro.end
+                    e = duration - offsetEnd
+                } else {
+                    e = duration
+                }
+            }
+            
+            if currentTime >= s && currentTime < e - 0.3 {
+                if isAutoSkipOutro {
+                    if abs(currentTime - lastOutroSkip) > 1.5 {
+                        lastOutroSkip = currentTime
+                        currentPlayer?.seek(to: CMTime(seconds: e, preferredTimescale: 600))
+                        showSkipToast(message: "Đã tự động bỏ qua Outro")
+                        return
+                    }
+                } else {
+                    showType = "Bỏ qua Outro ⏵"
+                    targetTime = e
+                }
+            }
+        }
+        
+        if let type = showType, let target = targetTime {
+            skipButton.setTitle(type, for: .normal)
+            skipButton.isHidden = false
+            currentSkipTarget = target
+            view.bringSubviewToFront(skipButton)
+        } else {
+            skipButton.isHidden = true
+            currentSkipTarget = nil
+        }
+    }
+
+    @objc private func performSkip() {
+        guard let target = currentSkipTarget else { return }
+        currentPlayer?.seek(to: CMTime(seconds: target, preferredTimescale: 600))
+        skipButton.isHidden = true
+        currentSkipTarget = nil
+    }
+
+    private func showSkipToast(message: String) {
+        skipToastLabel.text = "  \(message)  "
+        skipToastLabel.isHidden = false
+        view.bringSubviewToFront(skipToastLabel)
+        skipToastLabel.alpha = 1
+        
+        UIView.animate(withDuration: 0.3, delay: 2.0, options: .curveEaseOut, animations: {
+            self.skipToastLabel.alpha = 0
+        }) { _ in
+            self.skipToastLabel.isHidden = true
         }
     }
 
@@ -407,13 +561,16 @@ class PlayerController: UIViewController {
             resumeStatusObservation = token
         }
 
-        // Lưu vị trí mỗi 5s.
-        let interval = CMTime(seconds: 5, preferredTimescale: 600)
+        // Lưu vị trí mỗi 5s và kiểm tra Skip mỗi 1s.
+        let interval = CMTime(seconds: 1, preferredTimescale: 600)
         periodicTimeToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self = self, let url = self.episodeUrl else { return }
             let secs = CMTimeGetSeconds(time)
             if secs.isFinite {
-                self.persistCurrentPosition(for: url, clearWhenNearStart: false)
+                if Int(secs) % 5 == 0 {
+                    self.persistCurrentPosition(for: url, clearWhenNearStart: false)
+                }
+                self.checkSkip(currentTime: secs)
             }
         }
 

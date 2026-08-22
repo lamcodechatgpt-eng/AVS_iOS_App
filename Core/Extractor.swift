@@ -98,13 +98,21 @@ class Extractor {
 
                 let json = object.data(using: .utf8)
                     .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-                if let link = (json?["link"] as? String) ?? playerDataField("link", in: object) {
+                let possibleKeys = ["link", "file", "source", "src", "url", "streamUrl", "stream", "backup"]
+                var foundLink: String? = nil
+                for k in possibleKeys {
+                    if let val = (json?[k] as? String) ?? playerDataField(k, in: object), !val.isEmpty {
+                        foundLink = val
+                        break
+                    }
+                }
+                if let link = foundLink {
                     let playTech = ((json?["playTech"] as? String)
                         ?? playerDataField("playTech", in: object)
                         ?? "").lowercased()
                     Logger.shared.log("[Extractor] PLAYER_DATA tìm thấy. playTech=\(playTech) link=\(link)")
 
-                    if playTech == "iframe" || link.contains("googleapiscdn") || link.contains("/player/") {
+                    if playTech == "iframe" || link.contains("googleapiscdn") || link.contains("/player/") || link.contains("/embed/") {
                         guard let url = resolvedURL(link, relativeTo: episodeUrl) else { return completion(nil) }
                         return extractFromIframe(iframeUrl: url.absoluteString, isCancelled: isCancelled, completion: completion)
                     } else if link.lowercased().contains(".m3u8") || link.lowercased().contains(".mp4") {

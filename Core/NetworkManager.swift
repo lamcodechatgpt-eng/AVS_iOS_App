@@ -14,7 +14,12 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         "https://animevietsub.baby",
         "https://animevietsub.vip",
         "https://animevietsub.io",
-        "https://animevietsub.site"
+        "https://animevietsub.site",
+        "https://animevietsub.tv",
+        "https://animevietsub.moe",
+        "https://animevietsub.cc",
+        "https://animevietsub.net",
+        "https://animevietsub.app"
     ]
 
     private var domainProbeInFlight = false
@@ -580,7 +585,7 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     }
 
     static func isUsableListingHTML(_ html: String, statusCode: Int) -> Bool {
-        guard statusCode == 200 else { return false }
+        guard statusCode == 200 || statusCode == 301 || statusCode == 302 else { return false }
         let lower = html.lowercased()
         let isChallenge = lower.contains("cf-chl-")
             || lower.contains("just a moment")
@@ -588,6 +593,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         let hasListingContent = lower.contains("/phim/")
             || lower.contains("tpost")
             || lower.contains("ml-item")
+            || lower.contains("animevietsub")
+            || lower.contains("halim-")
         return !isChallenge && hasListingContent
     }
 
@@ -777,9 +784,16 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         return !movieTokens.isDisjoint(with: episodeTokens)
     }
 
-    private static func isEpisodeTitle(_ title: String, link: String) -> Bool {
+    static func isEpisodeTitle(_ title: String, link: String) -> Bool {
         let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let episodeMarker = "(?i)(?:tập|tap|episode|ep)\\s*[-._:# ]*\\d+(?:[.,]\\d+)?"
+        if normalized.isEmpty { return false }
+        
+        let lower = normalized.lowercased()
+        if lower.contains("đăng nhập") || lower.contains("login") || lower.contains("đăng ký") || lower.contains("trailer") {
+            return false
+        }
+        
+        let episodeMarker = "(?i)(?:tập|tap|episode|ep|ova|sp|special|part|phần|full)\\s*[-._:# ]*(\\d+(?:[.,]\\d+)?)?"
         if normalized.range(of: episodeMarker, options: .regularExpression) != nil {
             return true
         }
@@ -787,17 +801,52 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         // form only when the URL itself is an episode URL and the label is
         // short; arbitrary comment text containing a number stays rejected.
         let episodeLink = link.range(of: "(?i)(?:[-_/](?:tap|episode|ep)[-_\\d])", options: .regularExpression) != nil
-        return episodeLink && normalized.range(of: "^\\d{1,4}$", options: .regularExpression) != nil
+        return (episodeLink && normalized.range(of: "^\\d{1,4}$", options: .regularExpression) != nil) || normalized.range(of: "^(?:tập|ep)\\s*\\d{1,4}$", options: .caseInsensitive) != nil
     }
 
     static func sortedEpisodes(_ episodes: [Episode]) -> [Episode] {
         func number(in episode: Episode) -> Double? {
-            let source = episode.title + " " + episode.link
-            let pattern = "(?i)(?:tập|tap|episode|ep)[\\s._/-]*(\\d+(?:[.,]\\d+)?)"
-            guard let value = firstMatch(in: source, pattern: pattern)?.replacingOccurrences(of: ",", with: ".") else {
-                return nil
+            let title = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowerTitle = title.lowercased()
+            
+            if lowerTitle == "full" || lowerTitle == "tập full" || lowerTitle == "bản đẹp" {
+                return 0.0
             }
-            return Double(value)
+            if lowerTitle.hasPrefix("ova") || lowerTitle.hasPrefix("tập ova") {
+                let numPattern = "(\\d+)"
+                if let m = firstMatch(in: lowerTitle, pattern: numPattern), let v = Double(m) {
+                    return 10000.0 + v
+                }
+                return 10000.0
+            }
+            if lowerTitle.hasPrefix("sp") || lowerTitle.hasPrefix("special") || lowerTitle.contains("đặc biệt") {
+                let numPattern = "(\\d+)"
+                if let m = firstMatch(in: lowerTitle, pattern: numPattern), let v = Double(m) {
+                    return 20000.0 + v
+                }
+                return 20000.0
+            }
+            
+            let titlePattern = "(?i)(?:tập|tap|episode|ep)[\\s._/-]*(\\d+(?:[.,]\\d+)?)"
+            if let val = firstMatch(in: title, pattern: titlePattern)?.replacingOccurrences(of: ",", with: "."),
+               let d = Double(val) {
+                return d
+            }
+            if let d = Double(title) {
+                return d
+            }
+            
+            let linkPattern = "(?i)(?:[-_/](?:tap|episode|ep|e))[-_\\s]*(\\d+(?:[.,]\\d+)?)"
+            if let val = firstMatch(in: episode.link, pattern: linkPattern)?.replacingOccurrences(of: ",", with: "."),
+               let d = Double(val) {
+                return d
+            }
+            let genericNumPattern = "(?i)[-_/](\\d{1,4})(?:[-_/.]|$)"
+            if let val = firstMatch(in: episode.link, pattern: genericNumPattern),
+               let d = Double(val) {
+                return d
+            }
+            return nil
         }
 
         let numbered = episodes.enumerated().compactMap { index, episode -> (Int, Episode, Double)? in
@@ -1304,47 +1353,11 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             return
         }
         fetchHTML(url: normalizedUrl) { html in
-            var episodes: [Episode] = []
-            
-            let patterns = [
-                "(?i)<a[^>]*?href=[\"']([^\"']*?tap-[^\"']*?(?:\\.html)?)[\"'][^>]*>(.*?)</a>",
-                "(?i)<a[^>]*?href=[\"']([^\"']*?(?:/episode|/xem-phim|/tap)[^\"']*?(?:\\.html)?)[\"'][^>]*>(.*?)</a>"
-            ]
-            for pattern in patterns {
-                guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { continue }
-                let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
-                for match in matches {
-                    guard let linkRange = Range(match.range(at: 1), in: html),
-                          let titleRange = Range(match.range(at: 2), in: html) else { continue }
-                    
-                    let link = String(html[linkRange])
-                    let title = HTMLUtilities.plainText(fromHTML: String(html[titleRange]))
-                    
-                    let lowerTitle = title.lowercased()
-                    let lowerLink = link.lowercased()
-                    if lowerTitle.contains("đăng nhập") || lowerTitle.contains("login") || lowerLink.contains("login") || lowerTitle.contains("đăng ký") {
-                        continue
-                    }
-                    
-                    let isEpisodeTitle = lowerTitle.contains("tập")
-                        || lowerTitle.contains("episode")
-                        || (title.rangeOfCharacter(from: .decimalDigits) != nil && title.count < 30)
-                    guard isEpisodeTitle else { continue }
-                    
-                    guard Self.episodeLinkBelongsToMovie(link, movieURL: normalizedUrl),
-                          Self.isEpisodeTitle(title, link: link) else { continue }
-
-                    let fullLink = NetworkManager.shared.normalizeURL(link)
-                    if !episodes.contains(where: { ContentIdentifier.make(from: $0.link) == ContentIdentifier.make(from: fullLink) }) {
-                        episodes.append(Episode(title: title, link: fullLink))
-                    }
-                }
-                if !episodes.isEmpty { break }
-            }
+            let parsed = Self.parseEpisodes(from: html, movieURL: normalizedUrl)
             
             var uniqueEps: [Episode] = []
             var seen = Set<String>()
-            for ep in episodes.reversed() {
+            for ep in parsed.reversed() {
                 if !seen.contains(ep.link) {
                     seen.insert(ep.link)
                     uniqueEps.insert(ep, at: 0)
@@ -1368,5 +1381,96 @@ class NetworkManager: NSObject, WKNavigationDelegate {
                 completion(uniqueEps)
             }
         }
+    }
+
+    static func parseEpisodes(from html: String, movieURL: String) -> [Episode] {
+        var episodes: [Episode] = []
+        
+        // 1. CONTAINER PRIORITY: tìm các container chứa danh sách tập chuyên biệt của server
+        let containerPatterns = [
+            "(?i)<(?:div|ul)[^>]*?(?:class=[\"'][^\"']*?(?:halim-list-eps|list-episode|server-item|episodes-list|list-server|server-eps)[^\"']*?[\"']|id=[\"'](?:halim-list-server|list-server|episodes-list)[\"'])[^>]*?>([\\s\\S]*?)</(?:div|ul)>",
+            "(?i)<div[^>]*?class=[\"'][^\"']*?les-content[^\"']*?[\"'][^>]*?>([\\s\\S]*?)</div>"
+        ]
+        
+        var containerMatches: [String] = []
+        for cp in containerPatterns {
+            if let regex = try? NSRegularExpression(pattern: cp) {
+                let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+                for match in matches {
+                    if let r = Range(match.range(at: 1), in: html) {
+                        containerMatches.append(String(html[r]))
+                    }
+                }
+            }
+        }
+        
+        let anchorPattern = "(?i)<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>([\\s\\S]*?)</a>"
+        guard let anchorRegex = try? NSRegularExpression(pattern: anchorPattern) else { return [] }
+        
+        // Parse bên trong container trước nếu có
+        for containerHTML in containerMatches {
+            let matches = anchorRegex.matches(in: containerHTML, range: NSRange(containerHTML.startIndex..., in: containerHTML))
+            for match in matches {
+                guard let linkRange = Range(match.range(at: 1), in: containerHTML),
+                      let titleRange = Range(match.range(at: 2), in: containerHTML) else { continue }
+                
+                let link = String(containerHTML[linkRange])
+                let rawTitle = HTMLUtilities.plainText(fromHTML: String(containerHTML[titleRange]))
+                let title = normalizeEpisodeDisplayTitle(rawTitle)
+                
+                guard isEpisodeTitle(title, link: link) else { continue }
+                let fullLink = NetworkManager.shared.normalizeURL(link)
+                if !episodes.contains(where: { ContentIdentifier.make(from: $0.link) == ContentIdentifier.make(from: fullLink) }) {
+                    episodes.append(Episode(title: title, link: fullLink))
+                }
+            }
+        }
+        
+        if !episodes.isEmpty {
+            return episodes
+        }
+        
+        // 2. FALLBACK: Quét toàn bộ trang với bộ lọc ownership
+        let fallbackPatterns = [
+            "(?i)<a[^>]*?href=[\"']([^\"']*?tap-[^\"']*?(?:\\.html)?)[\"'][^>]*>(.*?)</a>",
+            "(?i)<a[^>]*?href=[\"']([^\"']*?(?:/episode|/xem-phim|/tap)[^\"']*?(?:\\.html)?)[\"'][^>]*>(.*?)</a>"
+        ]
+        for pattern in fallbackPatterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { continue }
+            let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+            for match in matches {
+                guard let linkRange = Range(match.range(at: 1), in: html),
+                      let titleRange = Range(match.range(at: 2), in: html) else { continue }
+                
+                let link = String(html[linkRange])
+                let rawTitle = HTMLUtilities.plainText(fromHTML: String(html[titleRange]))
+                let title = normalizeEpisodeDisplayTitle(rawTitle)
+                
+                let lowerTitle = title.lowercased()
+                let lowerLink = link.lowercased()
+                if lowerTitle.contains("đăng nhập") || lowerTitle.contains("login") || lowerLink.contains("login") || lowerTitle.contains("đăng ký") {
+                    continue
+                }
+                
+                guard episodeLinkBelongsToMovie(link, movieURL: movieURL),
+                      isEpisodeTitle(title, link: link) else { continue }
+
+                let fullLink = NetworkManager.shared.normalizeURL(link)
+                if !episodes.contains(where: { ContentIdentifier.make(from: $0.link) == ContentIdentifier.make(from: fullLink) }) {
+                    episodes.append(Episode(title: title, link: fullLink))
+                }
+            }
+            if !episodes.isEmpty { break }
+        }
+        
+        return episodes
+    }
+    
+    private static func normalizeEpisodeDisplayTitle(_ title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.range(of: "^\\d{1,4}$", options: .regularExpression) != nil {
+            return "Tập \(trimmed)"
+        }
+        return trimmed
     }
 }

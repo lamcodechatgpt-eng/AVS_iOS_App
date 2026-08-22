@@ -22,8 +22,6 @@ class MovieInfoViewController: UIViewController {
     private var resumeEpisodeIndex: Int?
     private var isDescriptionExpanded = false
 
-    private let bgView = BackgroundView()
-
     override func viewDidLoad() {
         super.viewDidLoad()
         guard movie != nil else {
@@ -33,7 +31,7 @@ class MovieInfoViewController: UIViewController {
         }
         title = movie.title
 
-        setupBackground()
+        view.backgroundColor = AppTheme.backgroundDark
         setupNavBar()
         setupViews()
         bindMovie()
@@ -83,19 +81,6 @@ class MovieInfoViewController: UIViewController {
         }
     }
 
-    private func setupBackground() {
-        bgView.setStyle(.default)
-        bgView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(bgView)
-        view.sendSubviewToBack(bgView)
-        NSLayoutConstraint.activate([
-            bgView.topAnchor.constraint(equalTo: view.topAnchor),
-            bgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            bgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bgView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-    }
-
     private func setupViews() {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.showsVerticalScrollIndicator = false
@@ -113,7 +98,7 @@ class MovieInfoViewController: UIViewController {
         bannerImage.backgroundColor = .tertiarySystemFill
         bannerImage.translatesAutoresizingMaskIntoConstraints = false
         let bannerWrap = UIView()
-        bannerWrap.backgroundColor = .bgTertiary
+        bannerWrap.backgroundColor = AppTheme.cardBackground
         bannerWrap.layer.cornerRadius = 22
         bannerWrap.clipsToBounds = true
         bannerWrap.addSubview(bannerImage)
@@ -126,28 +111,28 @@ class MovieInfoViewController: UIViewController {
             bannerHeightConstraint
         ])
 
-        titleLabel.font = .systemFont(ofSize: 24, weight: .bold)
+        titleLabel.font = AppTheme.Fonts.heroTitle(size: 26)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.numberOfLines = 0
-        metaLabel.font = .preferredFont(forTextStyle: .subheadline)
+        metaLabel.font = AppTheme.Fonts.subhead(size: 14)
         metaLabel.adjustsFontForContentSizeCategory = true
-        metaLabel.textColor = .secondaryLabel
+        metaLabel.textColor = AppTheme.textSecondary
         metaLabel.numberOfLines = 1
-        metaLabel.backgroundColor = UIColor.secondarySystemFill.withAlphaComponent(0.7)
+        metaLabel.backgroundColor = AppTheme.surfaceGlass
         metaLabel.layer.cornerRadius = 10
         metaLabel.clipsToBounds = true
 
-        descLabel.font = .preferredFont(forTextStyle: .body)
+        descLabel.font = AppTheme.Fonts.body(size: 15)
         descLabel.adjustsFontForContentSizeCategory = true
-        descLabel.textColor = .textPrimary
+        descLabel.textColor = AppTheme.textPrimary
         descLabel.numberOfLines = 4
-        descLabel.backgroundColor = UIColor.secondarySystemFill.withAlphaComponent(0.7)
+        descLabel.backgroundColor = AppTheme.surfaceGlass
         descLabel.layer.cornerRadius = 16
         descLabel.clipsToBounds = true
 
-        expandDescriptionButton.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
+        expandDescriptionButton.titleLabel?.font = AppTheme.Fonts.subhead(size: 14)
         expandDescriptionButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        expandDescriptionButton.tintColor = .accent
+        expandDescriptionButton.tintColor = AppTheme.secondaryAccent
         expandDescriptionButton.contentHorizontalAlignment = .leading
         expandDescriptionButton.setTitle("Xem thêm", for: .normal)
         expandDescriptionButton.setImage(UIImage(systemName: "chevron.down"), for: .normal)
@@ -216,10 +201,10 @@ class MovieInfoViewController: UIViewController {
     }
 
     private func styleAccentButton(_ btn: UIButton, accent: Bool = true) {
-        btn.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
-        btn.backgroundColor = accent ? .systemRed : .secondarySystemFill
-        btn.setTitleColor(accent ? .white : .label, for: .normal)
-        btn.tintColor = accent ? .white : .accent
+        btn.titleLabel?.font = AppTheme.Fonts.subhead(size: 15)
+        btn.backgroundColor = accent ? AppTheme.primaryAccent : AppTheme.surfaceGlass
+        btn.setTitleColor(accent ? .white : AppTheme.textPrimary, for: .normal)
+        btn.tintColor = accent ? .white : AppTheme.secondaryAccent
         btn.semanticContentAttribute = .forceLeftToRight
         btn.layer.cornerRadius = 12
         btn.clipsToBounds = true
@@ -270,9 +255,9 @@ class MovieInfoViewController: UIViewController {
         for g in d.genres.prefix(8) {
             let chip = UILabel()
             chip.text = "  \(g)  "
-            chip.font = .systemFont(ofSize: 12, weight: .semibold)
-            chip.textColor = .accent
-            chip.backgroundColor = UIColor.accent.withAlphaComponent(0.12)
+            chip.font = AppTheme.Fonts.subhead(size: 12)
+            chip.textColor = AppTheme.secondaryAccent
+            chip.backgroundColor = AppTheme.secondaryAccent.withAlphaComponent(0.12)
             chip.layer.cornerRadius = 12
             chip.clipsToBounds = true
             genreStack.addArrangedSubview(chip)

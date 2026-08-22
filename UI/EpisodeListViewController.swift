@@ -10,13 +10,11 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
     private var lastLayoutWidth: CGFloat = 0
     private var currentEpisodeIndex: Int?
 
-    private let bgView = BackgroundView()
-
     override func viewDidLoad() {
         super.viewDidLoad()
         self.title = movie?.title
+        view.backgroundColor = AppTheme.backgroundDark
 
-        setupBackground()
         setupCollectionView()
         setupLoader()
         setupEmptyLabel()
@@ -50,19 +48,6 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
         layout.invalidateLayout()
     }
 
-    private func setupBackground() {
-        bgView.setStyle(.accent)
-        bgView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(bgView)
-        view.sendSubviewToBack(bgView)
-        NSLayoutConstraint.activate([
-            bgView.topAnchor.constraint(equalTo: view.topAnchor),
-            bgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            bgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bgView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-    }
-
     private func setupCollectionView() {
         let layout = UICollectionViewFlowLayout()
         let interItem: CGFloat = 8
@@ -85,7 +70,7 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
                                 withReuseIdentifier: "Header")
 
         let refresh = UIRefreshControl()
-        refresh.tintColor = .label
+        refresh.tintColor = AppTheme.textPrimary
         refresh.addTarget(self, action: #selector(refresh(_:)), for: .valueChanged)
         collectionView.refreshControl = refresh
 
@@ -103,9 +88,9 @@ class EpisodeListViewController: UIViewController, UICollectionViewDataSource, U
 
     private func setupEmptyLabel() {
         emptyLabel.text = "Không tải được danh sách tập.\nKéo xuống để thử lại."
-        emptyLabel.font = .preferredFont(forTextStyle: .body)
+        emptyLabel.font = AppTheme.Fonts.body(size: 15)
         emptyLabel.adjustsFontForContentSizeCategory = true
-        emptyLabel.textColor = .secondaryLabel
+        emptyLabel.textColor = AppTheme.textSecondary
         emptyLabel.textAlignment = .center
         emptyLabel.numberOfLines = 0
         emptyLabel.isHidden = true
@@ -209,8 +194,8 @@ class EpisodeCell: UICollectionViewCell {
         contentView.layer.cornerRadius = 10
         contentView.clipsToBounds = true
 
-        progressView.trackTintColor = .clear
-        progressView.progressTintColor = .systemGreen
+        progressView.trackTintColor = AppTheme.surfaceGlass
+        progressView.progressTintColor = AppTheme.primaryAccent
         progressView.layer.cornerRadius = 1.5
         progressView.clipsToBounds = true
         progressView.translatesAutoresizingMaskIntoConstraints = false
@@ -220,8 +205,8 @@ class EpisodeCell: UICollectionViewCell {
         statusIcon.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(statusIcon)
 
-        label.font = .systemFont(ofSize: 14, weight: .semibold)
-        label.textColor = .label
+        label.font = AppTheme.Fonts.subhead(size: 14)
+        label.textColor = AppTheme.textPrimary
         label.textAlignment = .center
         label.adjustsFontSizeToFitWidth = true
         label.minimumScaleFactor = 0.7
@@ -261,24 +246,24 @@ class EpisodeCell: UICollectionViewCell {
         progressView.isHidden = progress <= 0
         accessibilityHint = isCurrent ? "Tập đang xem dở" : nil
         if watched {
-            contentView.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.1)
+            contentView.backgroundColor = AppTheme.primaryAccent.withAlphaComponent(0.2)
             contentView.layer.borderWidth = 1
-            contentView.layer.borderColor = UIColor.systemGreen.withAlphaComponent(0.3).cgColor
-            label.textColor = .systemGreen
+            contentView.layer.borderColor = AppTheme.primaryAccent.withAlphaComponent(0.4).cgColor
+            label.textColor = AppTheme.primaryAccent
             statusIcon.image = UIImage(systemName: "checkmark.circle.fill")
-            statusIcon.tintColor = .systemGreen
+            statusIcon.tintColor = AppTheme.primaryAccent
         } else {
-            contentView.backgroundColor = .secondarySystemBackground
+            contentView.backgroundColor = AppTheme.cardBackground
             contentView.layer.borderWidth = 1
-            contentView.layer.borderColor = UIColor.separator.cgColor
-            label.textColor = .label
+            contentView.layer.borderColor = AppTheme.surfaceGlass.cgColor
+            label.textColor = AppTheme.textPrimary
             statusIcon.image = UIImage(systemName: "play.circle")
-            statusIcon.tintColor = .secondaryLabel
+            statusIcon.tintColor = AppTheme.textSecondary
         }
 
         if isCurrent {
             contentView.layer.borderWidth = 2
-            contentView.layer.borderColor = UIColor.accent.cgColor
+            contentView.layer.borderColor = AppTheme.secondaryAccent.cgColor
             accessibilityTraits.insert(.selected)
         }
 
@@ -298,8 +283,8 @@ class EpisodeCell: UICollectionViewCell {
         didSet {
             guard !UIAccessibility.isReduceMotionEnabled else { return }
             UIView.animate(withDuration: 0.15, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
-                let base = self.isWatched ? UIColor.systemGreen.withAlphaComponent(0.1) : UIColor.secondarySystemBackground
-                self.contentView.backgroundColor = self.isHighlighted ? UIColor.systemFill : base
+                let base = self.isWatched ? AppTheme.primaryAccent.withAlphaComponent(0.2) : AppTheme.cardBackground
+                self.contentView.backgroundColor = self.isHighlighted ? AppTheme.surfaceGlass : base
                 self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.96, y: 0.96) : .identity
             }
         }

@@ -62,7 +62,7 @@ final class HomeViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         navigationItem.title = "AnimeVietsub"
-        view.backgroundColor = .bgPrimary
+        view.backgroundColor = AppTheme.backgroundDark
 
         setupCollectionView()
         setupDataSource()
@@ -640,6 +640,7 @@ final class HeroBannerCell: UICollectionViewCell {
 
         playPill.layer.cornerRadius = 16
         playPill.clipsToBounds = true
+        playPill.contentView.backgroundColor = AppTheme.primaryAccent.withAlphaComponent(0.8)
         playPill.translatesAutoresizingMaskIntoConstraints = false
         playLabel.text = "▶  Xem ngay"
         playLabel.font = .systemFont(ofSize: 13, weight: .bold)
@@ -724,11 +725,11 @@ final class ContinueWatchingCell: UICollectionViewCell {
         super.init(frame: frame)
         contentView.layer.cornerRadius = 10
         contentView.clipsToBounds = true
-        contentView.backgroundColor = .bgTertiary
+        contentView.backgroundColor = AppTheme.cardBackground
 
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
-        imageView.backgroundColor = .bgTertiary
+        imageView.backgroundColor = AppTheme.cardBackground
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
 
@@ -751,7 +752,7 @@ final class ContinueWatchingCell: UICollectionViewCell {
         progressTrack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(progressTrack)
 
-        progressBar.backgroundColor = .accent
+        progressBar.backgroundColor = AppTheme.primaryAccent
         progressBar.translatesAutoresizingMaskIntoConstraints = false
         progressTrack.addSubview(progressBar)
 
@@ -868,7 +869,7 @@ class MovieCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = .bgTertiary
+        contentView.backgroundColor = AppTheme.cardBackground
         contentView.layer.cornerRadius = 14
         contentView.clipsToBounds = true
 
@@ -889,6 +890,8 @@ class MovieCell: UICollectionViewCell {
         epsLabel.textAlignment = .center
         epsLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        epsBackground.effect = UIBlurEffect(style: .systemUltraThinMaterialDark)
+        epsBackground.contentView.backgroundColor = AppTheme.primaryAccent.withAlphaComponent(0.2)
         epsBackground.layer.cornerRadius = 8
         epsBackground.clipsToBounds = true
         epsBackground.translatesAutoresizingMaskIntoConstraints = false

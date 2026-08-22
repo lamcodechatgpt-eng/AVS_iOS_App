@@ -16,18 +16,7 @@ class SearchSuggestionsViewController: UIViewController, UITableViewDataSource, 
 
     override func viewDidLoad() {
         super.viewDidLoad()
-
-        let bgView = BackgroundView()
-        bgView.setStyle(.default)
-        bgView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(bgView)
-        view.sendSubviewToBack(bgView)
-        NSLayoutConstraint.activate([
-            bgView.topAnchor.constraint(equalTo: view.topAnchor),
-            bgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            bgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bgView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
+        view.backgroundColor = AppTheme.backgroundDark
 
         tableView.frame = view.bounds
         tableView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -41,9 +30,9 @@ class SearchSuggestionsViewController: UIViewController, UITableViewDataSource, 
         tableView.tableFooterView = UIView()
         view.addSubview(tableView)
 
-        emptyLabel.font = .preferredFont(forTextStyle: .body)
+        emptyLabel.font = AppTheme.Fonts.body(size: 15)
         emptyLabel.adjustsFontForContentSizeCategory = true
-        emptyLabel.textColor = .secondaryLabel
+        emptyLabel.textColor = AppTheme.textSecondary
         emptyLabel.textAlignment = .center
         emptyLabel.numberOfLines = 0
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -119,7 +108,7 @@ final class SuggestionCell: UITableViewCell {
         backgroundColor = .clear
         selectionStyle = .none
 
-        cardView.backgroundColor = .secondarySystemBackground
+        cardView.backgroundColor = AppTheme.cardBackground
         cardView.layer.cornerRadius = 14
         cardView.clipsToBounds = true
         cardView.translatesAutoresizingMaskIntoConstraints = false
@@ -128,21 +117,22 @@ final class SuggestionCell: UITableViewCell {
         poster.contentMode = .scaleAspectFill
         poster.clipsToBounds = true
         poster.layer.cornerRadius = 8
-        poster.backgroundColor = .tertiarySystemFill
+        poster.backgroundColor = AppTheme.surfaceGlass
         poster.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = .preferredFont(forTextStyle: .headline)
+        titleLabel.font = AppTheme.Fonts.subhead(size: 15)
+        titleLabel.textColor = AppTheme.textPrimary
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.numberOfLines = 2
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        statusLabel.font = .preferredFont(forTextStyle: .caption1)
+        statusLabel.font = AppTheme.Fonts.body(size: 12)
+        statusLabel.textColor = AppTheme.textSecondary
         statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.textColor = .secondaryLabel
         statusLabel.numberOfLines = 1
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        chevron.tintColor = .tertiaryLabel
+        chevron.tintColor = AppTheme.surfaceGlass
         chevron.contentMode = .scaleAspectFit
         chevron.translatesAutoresizingMaskIntoConstraints = false
 
@@ -214,10 +204,10 @@ final class SuggestionCell: UITableViewCell {
     }
 
     private static func highlightedTitle(_ title: String, query: String) -> NSAttributedString {
-        let baseFont = UIFont.preferredFont(forTextStyle: .headline)
+        let baseFont = AppTheme.Fonts.subhead(size: 15)
         let result = NSMutableAttributedString(string: title, attributes: [
             .font: baseFont,
-            .foregroundColor: UIColor.label
+            .foregroundColor: AppTheme.textPrimary
         ])
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return result }
@@ -230,7 +220,7 @@ final class SuggestionCell: UITableViewCell {
                                      options: [.caseInsensitive, .diacriticInsensitive],
                                      range: NSRange(location: searchStart, length: source.length - searchStart))
             guard range.location != NSNotFound else { break }
-            result.addAttributes([.font: highlightFont, .foregroundColor: UIColor.accent], range: range)
+            result.addAttributes([.font: highlightFont, .foregroundColor: AppTheme.primaryAccent], range: range)
             searchStart = range.location + max(range.length, 1)
         }
         return result
