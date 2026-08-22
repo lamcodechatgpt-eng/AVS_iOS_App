@@ -82,8 +82,7 @@ public class AniSkipManager {
         
         // 1. Kiểm tra cache skip times
         let cacheKey = "\(cacheKeyPrefix)\(movieUrl.hashValue)_\(epNumber)"
-        if let cachedData = DiskCache.shared.data(for: cacheKey),
-           let cachedResult = try? JSONDecoder().decode(AniSkipResult.self, from: cachedData) {
+        if let cachedResult: AniSkipResult = DiskCache.shared.get(cacheKey, ttl: 86400 * 30, as: AniSkipResult.self) {
             completion(cachedResult)
             return
         }
@@ -100,17 +99,13 @@ public class AniSkipManager {
                 guard let self = self else { return }
                 
                 if let result = result {
-                    if let data = try? JSONEncoder().encode(result) {
-                        DiskCache.shared.set(data, for: cacheKey)
-                    }
+                    DiskCache.shared.set(result, forKey: cacheKey)
                     completion(result)
                 } else {
                     // Fallback estimation từ các tập lân cận
                     self.fetchAlternativeEpisodeTimes(malId: malId, currentEp: epNumber) { fallback in
                         if let fb = fallback {
-                            if let data = try? JSONEncoder().encode(fb) {
-                                DiskCache.shared.set(data, for: cacheKey)
-                            }
+                            DiskCache.shared.set(fb, forKey: cacheKey)
                         }
                         completion(fallback)
                     }
@@ -128,8 +123,7 @@ public class AniSkipManager {
         // 1. Kiểm tra cache cho từng tên trước
         for name in names {
             let cacheKey = "\(malIdCachePrefix)\(name.hashValue)"
-            if let data = DiskCache.shared.data(for: cacheKey),
-               let id = try? JSONDecoder().decode(Int.self, from: data) {
+            if let id: Int = DiskCache.shared.get(cacheKey, ttl: 86400 * 60, as: Int.self) {
                 completion(id)
                 return
             }
@@ -147,17 +141,13 @@ public class AniSkipManager {
             searchAniList(title: currentTitle) { [weak self] id in
                 guard let self = self else { return }
                 if let id = id {
-                    if let data = try? JSONEncoder().encode(id) {
-                        DiskCache.shared.set(data, for: cacheKey)
-                    }
+                    DiskCache.shared.set(id, forKey: cacheKey)
                     completion(id)
                 } else {
                     self.searchJikan(title: currentTitle) { [weak self] id2 in
                         guard let self = self else { return }
                         if let id2 = id2 {
-                            if let data = try? JSONEncoder().encode(id2) {
-                                DiskCache.shared.set(data, for: cacheKey)
-                            }
+                            DiskCache.shared.set(id2, forKey: cacheKey)
                             completion(id2)
                         } else {
                             searchCandidate(at: index + 1)
