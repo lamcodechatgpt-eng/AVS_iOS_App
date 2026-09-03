@@ -243,9 +243,7 @@ class MovieInfoViewController: UIViewController {
         var metaParts: [String] = []
         if !d.rating.isEmpty { metaParts.append("⭐ \(d.rating)") }
         if !d.year.isEmpty { metaParts.append("📅 \(d.year)") }
-        if !d.status.isEmpty { metaParts.append("🎬 \(d.status)") }
-        if !d.duration.isEmpty { metaParts.append("⏱ \(d.duration)") }
-        if metaParts.isEmpty && !movie.episodeStatus.isEmpty {
+        if !movie.episodeStatus.isEmpty {
             metaParts.append(movie.episodeStatus)
         }
         metaLabel.text = metaParts.joined(separator: "   •   ")
