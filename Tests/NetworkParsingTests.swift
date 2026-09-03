@@ -182,5 +182,10 @@ final class NetworkParsingTests: XCTestCase {
         let sorted = NetworkManager.sortedEpisodes(episodes)
         XCTAssertEqual(sorted.map(\.title), ["Tập Full", "Tập 1", "Tập 2", "OVA 1"])
     }
+
+    func testPrimaryDomainDefaultAndRedirectURL() {
+        XCTAssertEqual(NetworkManager.primaryRedirectURL, "https://bit.ly/animevietsubtv")
+        XCTAssertTrue(NetworkManager.shared.resolvedDomain.contains("animevietsub"))
+    }
 }
 

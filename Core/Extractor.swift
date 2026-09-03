@@ -175,19 +175,31 @@ class Extractor {
     private static func extractFromIframe(iframeUrl: String,
                                           isCancelled: @escaping () -> Bool,
                                           completion: @escaping (Stream?) -> Void) {
+        // Referer cần là origin (scheme + host), không phải full URL — server stream
+        // thường so sánh prefix "https://stream.googleapiscdn.com/".
+        let referer: String = {
+            if let u = URL(string: iframeUrl), let host = u.host {
+                return "\(u.scheme ?? "https")://\(host)/"
+            }
+            return iframeUrl
+        }()
+
+        // Kiểm tra nếu iframeUrl đã chứa sẵn stream m3u8/mp4 trong query parameters (vd: player.phimapi.com/player/?url=https://...m3u8)
+        if let comps = URLComponents(string: iframeUrl), let items = comps.queryItems {
+            for item in items where item.name == "url" || item.name == "link" || item.name == "file" || item.name == "source" {
+                if let val = item.value, (val.lowercased().contains(".m3u8") || val.lowercased().contains(".mp4")),
+                   let direct = URL(string: val) {
+                    Logger.shared.log("[Extractor] Trích xuất trực tiếp m3u8 từ query param của iframe: \(val)")
+                    return completion(Stream(url: direct, referer: referer))
+                }
+            }
+        }
+
         // Trỏ NetworkManager fetch iframe URL thông qua WKWebView để bypass Cloudflare Bot Detection trên CDN
         NetworkManager.shared.fetchHTML(url: iframeUrl,
                                         waitForIframe: true,
                                         isCancelled: isCancelled) { html in
             guard !isCancelled() else { return completion(nil) }
-            // Referer cần là origin (scheme + host), không phải full URL — server stream
-            // thường so sánh prefix "https://stream.googleapiscdn.com/".
-            let referer: String = {
-                if let u = URL(string: iframeUrl), let host = u.host {
-                    return "\(u.scheme ?? "https")://\(host)/"
-                }
-                return iframeUrl
-            }()
 
             if html.isEmpty {
                 Logger.shared.log("[Extractor] Iframe \(iframeUrl) trả về rỗng (CF challenge chưa giải xong?).")

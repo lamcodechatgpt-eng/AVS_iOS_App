@@ -5,22 +5,10 @@ import WebKit
 class NetworkManager: NSObject, WKNavigationDelegate {
     static let shared = NetworkManager()
     
-    private static let defaultDomain = "https://animevietsub.meme"
+    public static let primaryRedirectURL = "https://bit.ly/animevietsubtv"
+    private static let defaultDomain = "https://animevietsub.li"
     private static let domainProbeDateKey = "AVS_LastDomainProbe"
     private static let domainProbeSuccessKey = "AVS_LastDomainProbeSucceeded"
-    private static let domainCandidates = [
-        "https://animevietsub.meme",
-        "https://animevietsub.mom",
-        "https://animevietsub.baby",
-        "https://animevietsub.vip",
-        "https://animevietsub.io",
-        "https://animevietsub.site",
-        "https://animevietsub.tv",
-        "https://animevietsub.moe",
-        "https://animevietsub.cc",
-        "https://animevietsub.net",
-        "https://animevietsub.app"
-    ]
 
     private var domainProbeInFlight = false
     private var domainProbeCompletions: [(String) -> Void] = []
@@ -28,7 +16,12 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     var resolvedDomain: String {
         get {
             let stored = UserDefaults.standard.string(forKey: "AVS_ResolvedDomain")
-            return stored == "https://animevietsub.pl" ? Self.defaultDomain : (stored ?? Self.defaultDomain)
+            if let stored = stored,
+               !stored.contains("animevietsub.pl"),
+               !stored.contains("animevietsub.meme") {
+                return stored
+            }
+            return Self.defaultDomain
         }
         set {
             let candidate = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -57,9 +50,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
         }
     }
     
-    /// Ép URL về đúng resolvedDomain hiện tại, dù link gốc chứa domain cũ.
-    /// Probe known aliases and keep the first one serving a real listing page.
-    /// The timestamp avoids probing every candidate on every app launch.
+    /// Tự động cập nhật domain chuẩn từ link chuyển hướng chính thức (bit.ly/animevietsubtv)
+    /// mà không cần hardcode danh sách domainCandidates.
     func autoDetectDomain(force: Bool = false, completion: @escaping (String) -> Void) {
         let start = {
             let now = Date().timeIntervalSince1970
@@ -76,54 +68,74 @@ class NetworkManager: NSObject, WKNavigationDelegate {
             self.domainProbeInFlight = true
             UserDefaults.standard.set(now, forKey: Self.domainProbeDateKey)
 
-            let group = DispatchGroup()
-            let lock = NSLock()
-            var selectedDomain: String?
-            for candidate in Self.domainCandidates {
-                guard let url = URL(string: candidate) else { continue }
-                group.enter()
-                var request = URLRequest(url: url)
-                request.timeoutInterval = 5
-                request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
-                request.setValue("vi-VN,vi;q=0.9,en;q=0.7", forHTTPHeaderField: "Accept-Language")
-                request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
-                                 forHTTPHeaderField: "User-Agent")
-                URLSession.shared.dataTask(with: request) { data, response, error in
-                    defer { group.leave() }
-                    guard error == nil,
-                          let http = response as? HTTPURLResponse,
-                          let html = data.flatMap({ String(data: $0, encoding: .utf8) }),
-                          Self.isUsableListingHTML(html, statusCode: http.statusCode),
-                          let finalURL = http.url,
-                          let scheme = finalURL.scheme,
-                          let host = finalURL.host else { return }
-                    var components = URLComponents()
-                    components.scheme = scheme
-                    components.host = host
-                    components.port = finalURL.port
-                    guard let detected = components.url?.absoluteString else { return }
-                    lock.lock()
-                    if selectedDomain == nil { selectedDomain = detected }
-                    lock.unlock()
-                }.resume()
-            }
-            group.notify(queue: .main) {
-                lock.lock()
-                let detected = selectedDomain
-                lock.unlock()
-                if let detected = detected, detected != self.resolvedDomain {
-                    self.resolvedDomain = detected
-                    Logger.shared.log("[Domain] Auto-selected \(detected)")
+            self.resolveDomainFromShortlink(Self.primaryRedirectURL) { [weak self] detected in
+                guard let self = self else { return }
+                DispatchQueue.main.async {
+                    if let detected = detected, detected != self.resolvedDomain {
+                        self.resolvedDomain = detected
+                        Logger.shared.log("[Domain] Tự động cập nhật domain chuẩn từ bit.ly: \(detected)")
+                    }
+                    UserDefaults.standard.set(detected != nil, forKey: Self.domainProbeSuccessKey)
+                    let result = self.resolvedDomain
+                    let completions = self.domainProbeCompletions
+                    self.domainProbeCompletions.removeAll()
+                    self.domainProbeInFlight = false
+                    completions.forEach { $0(result) }
                 }
-                UserDefaults.standard.set(detected != nil, forKey: Self.domainProbeSuccessKey)
-                let result = self.resolvedDomain
-                let completions = self.domainProbeCompletions
-                self.domainProbeCompletions.removeAll()
-                self.domainProbeInFlight = false
-                completions.forEach { $0(result) }
             }
         }
         if Thread.isMainThread { start() } else { DispatchQueue.main.async(execute: start) }
+    }
+
+    private func resolveDomainFromShortlink(_ urlString: String, completion: @escaping (String?) -> Void) {
+        guard let url = URL(string: urlString) else {
+            completion(nil)
+            return
+        }
+
+        class RedirectTracker: NSObject, URLSessionTaskDelegate {
+            var capturedDomain: String?
+
+            func urlSession(_ session: URLSession,
+                            task: URLSessionTask,
+                            willPerformHTTPRedirection response: HTTPURLResponse,
+                            newRequest request: URLRequest,
+                            completionHandler: @escaping (URLRequest?) -> Void) {
+                if let reqURL = request.url,
+                   let host = reqURL.host?.lowercased(),
+                   host.contains("animevietsub"),
+                   let scheme = reqURL.scheme {
+                    self.capturedDomain = "\(scheme)://\(host)"
+                }
+                completionHandler(request)
+            }
+        }
+
+        let tracker = RedirectTracker()
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 10
+        let session = URLSession(configuration: config, delegate: tracker, delegateQueue: nil)
+
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+                         forHTTPHeaderField: "User-Agent")
+
+        session.dataTask(with: request) { _, response, _ in
+            if let captured = tracker.capturedDomain {
+                completion(captured)
+                return
+            }
+            if let http = response as? HTTPURLResponse,
+               let respURL = http.url,
+               let host = respURL.host?.lowercased(),
+               host.contains("animevietsub"),
+               let scheme = respURL.scheme {
+                completion("\(scheme)://\(host)")
+                return
+            }
+            completion(nil)
+        }.resume()
     }
 
     func normalizeURL(_ urlString: String) -> String {
@@ -167,7 +179,8 @@ class NetworkManager: NSObject, WKNavigationDelegate {
     
     override init() {
         super.init()
-        if UserDefaults.standard.string(forKey: "AVS_ResolvedDomain") == "https://animevietsub.pl" {
+        if let stored = UserDefaults.standard.string(forKey: "AVS_ResolvedDomain"),
+           stored.contains("animevietsub.pl") || stored.contains("animevietsub.meme") {
             UserDefaults.standard.set(Self.defaultDomain, forKey: "AVS_ResolvedDomain")
             DiskCache.shared.removeAll()
         }
