@@ -598,56 +598,79 @@ extension HomeViewController: UISearchBarDelegate, UISearchResultsUpdating {
     }
 }
 
-// MARK: - HeroBannerCell
+// MARK: - HeroBannerCell (VIP Cinematic Design)
 final class HeroBannerCell: UICollectionViewCell {
     private let imageView = UIImageView()
     private let overlayGradient = CAGradientLayer()
     private let titleLabel = UILabel()
     private let genreLabel = UILabel()
-    private let playPill = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
-    private let playLabel = UILabel()
+    private let hotBadge = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+    private let hotLabel = UILabel()
+    private let playButton = UIButton(type: .custom)
+    private var playGradient: CAGradientLayer?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
-        imageView.backgroundColor = .bgTertiary
+        imageView.backgroundColor = AppTheme.cardBackground
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.layer.cornerRadius = 22
+
+        contentView.layer.cornerRadius = 24
+        contentView.layer.borderWidth = 1
+        contentView.layer.borderColor = AppTheme.borderHighlight.cgColor
         contentView.clipsToBounds = true
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.24
-        layer.shadowRadius = 12
-        layer.shadowOffset = CGSize(width: 0, height: 7)
         contentView.addSubview(imageView)
 
-        overlayGradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.85).cgColor]
-        overlayGradient.locations = [0.4, 1.0]
+        // Multi-stop Cinematic Dark Gradient
+        overlayGradient.colors = [
+            UIColor.clear.cgColor,
+            UIColor.black.withAlphaComponent(0.4).cgColor,
+            UIColor.black.withAlphaComponent(0.92).cgColor
+        ]
+        overlayGradient.locations = [0.25, 0.65, 1.0]
         imageView.layer.addSublayer(overlayGradient)
 
-        titleLabel.font = .preferredFont(forTextStyle: .title2)
+        // VIP Hot Badge
+        hotBadge.layer.cornerRadius = 12
+        hotBadge.clipsToBounds = true
+        hotBadge.contentView.backgroundColor = AppTheme.primaryAccent.withAlphaComponent(0.25)
+        hotBadge.layer.borderWidth = 1
+        hotBadge.layer.borderColor = AppTheme.primaryAccent.withAlphaComponent(0.5).cgColor
+        hotBadge.translatesAutoresizingMaskIntoConstraints = false
+
+        hotLabel.text = "🔥 THỊNH HÀNH"
+        hotLabel.font = AppTheme.Fonts.badge(size: 11)
+        hotLabel.textColor = .white
+        hotLabel.translatesAutoresizingMaskIntoConstraints = false
+        hotBadge.contentView.addSubview(hotLabel)
+        contentView.addSubview(hotBadge)
+
+        // Title
+        titleLabel.font = AppTheme.Fonts.heroTitle(size: 21)
         titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.textColor = .white
+        titleLabel.textColor = AppTheme.textPrimary
         titleLabel.numberOfLines = 2
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
 
-        genreLabel.font = .preferredFont(forTextStyle: .subheadline)
+        // Episode / Genre subtitle
+        genreLabel.font = AppTheme.Fonts.subhead(size: 13)
         genreLabel.adjustsFontForContentSizeCategory = true
-        genreLabel.textColor = UIColor.white.withAlphaComponent(0.8)
+        genreLabel.textColor = AppTheme.textSecondary
         genreLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(genreLabel)
 
-        playPill.layer.cornerRadius = 16
-        playPill.clipsToBounds = true
-        playPill.contentView.backgroundColor = AppTheme.primaryAccent.withAlphaComponent(0.8)
-        playPill.translatesAutoresizingMaskIntoConstraints = false
-        playLabel.text = "▶  Xem ngay"
-        playLabel.font = .systemFont(ofSize: 13, weight: .bold)
-        playLabel.textColor = .white
-        playLabel.translatesAutoresizingMaskIntoConstraints = false
-        playPill.contentView.addSubview(playLabel)
-        contentView.addSubview(playPill)
+        // Play Button (Primary Gradient Pill)
+        playButton.titleLabel?.font = AppTheme.Fonts.subhead(size: 13)
+        playButton.setTitle("▶  Xem ngay", for: .normal)
+        playButton.setTitleColor(.white, for: .normal)
+        playButton.layer.cornerRadius = 16
+        playButton.clipsToBounds = true
+        playButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        playButton.translatesAutoresizingMaskIntoConstraints = false
+        AppTheme.applyGlow(to: playButton, color: AppTheme.primaryAccent, radius: 10, opacity: 0.45)
+        contentView.addSubview(playButton)
 
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
@@ -655,21 +678,27 @@ final class HeroBannerCell: UICollectionViewCell {
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
 
+            hotBadge.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
+            hotBadge.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 14),
+            hotLabel.leadingAnchor.constraint(equalTo: hotBadge.contentView.leadingAnchor, constant: 10),
+            hotLabel.trailingAnchor.constraint(equalTo: hotBadge.contentView.trailingAnchor, constant: -10),
+            hotLabel.topAnchor.constraint(equalTo: hotBadge.contentView.topAnchor, constant: 5),
+            hotLabel.bottomAnchor.constraint(equalTo: hotBadge.contentView.bottomAnchor, constant: -5),
+
+            playButton.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
+            playButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -14),
+            playButton.heightAnchor.constraint(equalToConstant: 34),
+
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             titleLabel.bottomAnchor.constraint(equalTo: genreLabel.topAnchor, constant: -4),
 
             genreLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             genreLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            genreLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -24),
-
-            playPill.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
-            playPill.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -14),
-            playLabel.leadingAnchor.constraint(equalTo: playPill.contentView.leadingAnchor, constant: 10),
-            playLabel.trailingAnchor.constraint(equalTo: playPill.contentView.trailingAnchor, constant: -10),
-            playLabel.topAnchor.constraint(equalTo: playPill.contentView.topAnchor, constant: 7),
-            playLabel.bottomAnchor.constraint(equalTo: playPill.contentView.bottomAnchor, constant: -7)
+            genreLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -18)
         ])
+
+        AppTheme.applyGlow(to: self, color: UIColor.black, radius: 14, opacity: 0.35)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -678,17 +707,15 @@ final class HeroBannerCell: UICollectionViewCell {
         super.layoutSubviews()
         overlayGradient.frame = imageView.bounds
         layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: contentView.layer.cornerRadius).cgPath
+        
+        playGradient?.removeFromSuperlayer()
+        let grad = AppTheme.makePrimaryGradient(frame: playButton.bounds, cornerRadius: 16)
+        playButton.layer.insertSublayer(grad, at: 0)
+        playGradient = grad
     }
 
     override var isHighlighted: Bool {
-        didSet { animateHighlight(isHighlighted) }
-    }
-
-    private func animateHighlight(_ highlighted: Bool) {
-        guard !UIAccessibility.isReduceMotionEnabled else { return }
-        UIView.animate(withDuration: 0.14, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
-            self.transform = highlighted ? CGAffineTransform(scaleX: 0.975, y: 0.975) : .identity
-        }
+        didSet { AppTheme.applyPressFeedback(to: self, isPressed: isHighlighted) }
     }
 
     override func prepareForReuse() {
@@ -711,10 +738,12 @@ final class HeroBannerCell: UICollectionViewCell {
     }
 }
 
-// MARK: - ContinueWatchingCell
+// MARK: - ContinueWatchingCell (VIP Design)
 final class ContinueWatchingCell: UICollectionViewCell {
     private let imageView = UIImageView()
     private let overlayGradient = CAGradientLayer()
+    private let playOverlay = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+    private let playIcon = UIImageView()
     private let progressBar = UIView()
     private let progressTrack = UIView()
     private var progressWidthConstraint: NSLayoutConstraint!
@@ -723,7 +752,9 @@ final class ContinueWatchingCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.layer.cornerRadius = 10
+        contentView.layer.cornerRadius = 14
+        contentView.layer.borderWidth = 1
+        contentView.layer.borderColor = AppTheme.borderGlass.cgColor
         contentView.clipsToBounds = true
         contentView.backgroundColor = AppTheme.cardBackground
 
@@ -733,22 +764,36 @@ final class ContinueWatchingCell: UICollectionViewCell {
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
 
-        overlayGradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.88).cgColor]
-        overlayGradient.locations = [0.35, 1.0]
+        overlayGradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.92).cgColor]
+        overlayGradient.locations = [0.3, 1.0]
         imageView.layer.addSublayer(overlayGradient)
 
-        titleLabel.font = .systemFont(ofSize: 13, weight: .bold)
-        titleLabel.textColor = .white
+        // Circular Play Overlay in Center
+        playOverlay.layer.cornerRadius = 18
+        playOverlay.clipsToBounds = true
+        playOverlay.layer.borderWidth = 1
+        playOverlay.layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
+        playOverlay.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(playOverlay)
+
+        playIcon.image = UIImage(systemName: "play.fill")
+        playIcon.tintColor = .white
+        playIcon.contentMode = .scaleAspectFit
+        playIcon.translatesAutoresizingMaskIntoConstraints = false
+        playOverlay.contentView.addSubview(playIcon)
+
+        titleLabel.font = AppTheme.Fonts.subhead(size: 13)
+        titleLabel.textColor = AppTheme.textPrimary
         titleLabel.numberOfLines = 2
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
 
-        progressLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-        progressLabel.textColor = UIColor.white.withAlphaComponent(0.78)
+        progressLabel.font = AppTheme.Fonts.caption(size: 11)
+        progressLabel.textColor = AppTheme.secondaryAccent
         progressLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(progressLabel)
 
-        progressTrack.backgroundColor = UIColor.white.withAlphaComponent(0.2)
+        progressTrack.backgroundColor = UIColor.white.withAlphaComponent(0.18)
         progressTrack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(progressTrack)
 
@@ -765,9 +810,20 @@ final class ContinueWatchingCell: UICollectionViewCell {
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
 
+            playOverlay.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            playOverlay.centerYAnchor.constraint(equalTo: contentView.centerYAnchor, constant: -16),
+            playOverlay.widthAnchor.constraint(equalToConstant: 36),
+            playOverlay.heightAnchor.constraint(equalToConstant: 36),
+
+            playIcon.centerXAnchor.constraint(equalTo: playOverlay.contentView.centerXAnchor, constant: 1),
+            playIcon.centerYAnchor.constraint(equalTo: playOverlay.contentView.centerYAnchor),
+            playIcon.widthAnchor.constraint(equalToConstant: 14),
+            playIcon.heightAnchor.constraint(equalToConstant: 14),
+
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 10),
             titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10),
             titleLabel.bottomAnchor.constraint(equalTo: progressLabel.topAnchor, constant: -3),
+
             progressLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             progressLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
             progressLabel.bottomAnchor.constraint(equalTo: progressTrack.topAnchor, constant: -8),
@@ -775,12 +831,14 @@ final class ContinueWatchingCell: UICollectionViewCell {
             progressTrack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             progressTrack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             progressTrack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            progressTrack.heightAnchor.constraint(equalToConstant: 3),
+            progressTrack.heightAnchor.constraint(equalToConstant: 3.5),
 
             progressBar.leadingAnchor.constraint(equalTo: progressTrack.leadingAnchor),
             progressBar.topAnchor.constraint(equalTo: progressTrack.topAnchor),
             progressBar.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor)
         ])
+
+        AppTheme.applyGlow(to: self, color: UIColor.black, radius: 8, opacity: 0.25)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -800,12 +858,7 @@ final class ContinueWatchingCell: UICollectionViewCell {
     }
 
     override var isHighlighted: Bool {
-        didSet {
-            guard !UIAccessibility.isReduceMotionEnabled else { return }
-            UIView.animate(withDuration: 0.14, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
-                self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.96, y: 0.96) : .identity
-            }
-        }
+        didSet { AppTheme.applyPressFeedback(to: self, isPressed: isHighlighted) }
     }
 
     func configure(with movie: Movie?, progress: Double) {
@@ -825,28 +878,45 @@ final class ContinueWatchingCell: UICollectionViewCell {
     }
 }
 
-// MARK: - SectionHeader
+// MARK: - SectionHeader (VIP Cinematic Bar)
 final class SectionHeader: UICollectionReusableView {
+    private let indicatorBar = UIView()
     let titleLabel = UILabel()
     private let detailLabel = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        titleLabel.font = .systemFont(ofSize: 19, weight: .bold)
-        titleLabel.textColor = .textPrimary
+
+        // Cột đỏ chỉ báo thương hiệu rạp chiếu
+        indicatorBar.backgroundColor = AppTheme.primaryAccent
+        indicatorBar.layer.cornerRadius = 2
+        indicatorBar.clipsToBounds = true
+        indicatorBar.translatesAutoresizingMaskIntoConstraints = false
+        AppTheme.applyGlow(to: indicatorBar, color: AppTheme.primaryAccent, radius: 6, opacity: 0.6)
+        addSubview(indicatorBar)
+
+        titleLabel.font = AppTheme.Fonts.sectionHeader(size: 18)
+        titleLabel.textColor = AppTheme.textPrimary
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        detailLabel.font = .preferredFont(forTextStyle: .caption1)
-        detailLabel.adjustsFontForContentSizeCategory = true
-        detailLabel.textColor = .textSecondary
+        addSubview(titleLabel)
+
+        detailLabel.font = AppTheme.Fonts.subhead(size: 13)
+        detailLabel.textColor = AppTheme.secondaryAccent
         detailLabel.textAlignment = .right
         detailLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(titleLabel)
         addSubview(detailLabel)
+
         NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            indicatorBar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            indicatorBar.centerYAnchor.constraint(equalTo: centerYAnchor),
+            indicatorBar.widthAnchor.constraint(equalToConstant: 4),
+            indicatorBar.heightAnchor.constraint(equalToConstant: 18),
+
+            titleLabel.leadingAnchor.constraint(equalTo: indicatorBar.trailingAnchor, constant: 8),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: detailLabel.leadingAnchor, constant: -8),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+
+            detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             detailLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
     }
@@ -859,40 +929,47 @@ final class SectionHeader: UICollectionReusableView {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-// MARK: - MovieCell (giữ nguyên style hiện tại)
+// MARK: - MovieCell (VIP Card Design)
 class MovieCell: UICollectionViewCell {
     let imageView = UIImageView()
     let titleLabel = UILabel()
     let epsLabel = UILabel()
-    let epsBackground = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+    let epsBackground = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
     let gradientLayer = CAGradientLayer()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = AppTheme.cardBackground
-        contentView.layer.cornerRadius = 14
+        contentView.layer.cornerRadius = 16
+        contentView.layer.borderWidth = 1
+        contentView.layer.borderColor = AppTheme.borderGlass.cgColor
         contentView.clipsToBounds = true
 
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.translatesAutoresizingMaskIntoConstraints = false
 
-        gradientLayer.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.9).cgColor]
-        gradientLayer.locations = [0.5, 1.0]
+        gradientLayer.colors = [
+            UIColor.clear.cgColor,
+            UIColor.black.withAlphaComponent(0.3).cgColor,
+            UIColor.black.withAlphaComponent(0.92).cgColor
+        ]
+        gradientLayer.locations = [0.35, 0.65, 1.0]
 
-        titleLabel.font = .systemFont(ofSize: 13, weight: .bold)
-        titleLabel.textColor = .white
+        titleLabel.font = AppTheme.Fonts.subhead(size: 13)
+        titleLabel.textColor = AppTheme.textPrimary
         titleLabel.numberOfLines = 2
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        epsLabel.font = .systemFont(ofSize: 11, weight: .heavy)
+        epsLabel.font = AppTheme.Fonts.badge(size: 10)
         epsLabel.textColor = .white
         epsLabel.textAlignment = .center
         epsLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        epsBackground.effect = UIBlurEffect(style: .systemUltraThinMaterialDark)
-        epsBackground.contentView.backgroundColor = AppTheme.primaryAccent.withAlphaComponent(0.2)
+        epsBackground.contentView.backgroundColor = AppTheme.primaryAccent.withAlphaComponent(0.35)
         epsBackground.layer.cornerRadius = 8
+        epsBackground.layer.borderWidth = 0.5
+        epsBackground.layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
         epsBackground.clipsToBounds = true
         epsBackground.translatesAutoresizingMaskIntoConstraints = false
 
@@ -939,6 +1016,7 @@ class MovieCell: UICollectionViewCell {
         epsLabel.text = nil
         epsBackground.isHidden = true
     }
+
 
     private func setupShadow() {
         layer.shadowColor = UIColor.black.cgColor

@@ -246,25 +246,32 @@ class EpisodeCell: UICollectionViewCell {
         progressView.isHidden = progress <= 0
         accessibilityHint = isCurrent ? "Tập đang xem dở" : nil
         if watched {
-            contentView.backgroundColor = AppTheme.primaryAccent.withAlphaComponent(0.2)
+            contentView.backgroundColor = AppTheme.cardBackgroundLighter
             contentView.layer.borderWidth = 1
-            contentView.layer.borderColor = AppTheme.primaryAccent.withAlphaComponent(0.4).cgColor
-            label.textColor = AppTheme.primaryAccent
+            contentView.layer.borderColor = AppTheme.emeraldSuccess.withAlphaComponent(0.35).cgColor
+            label.textColor = AppTheme.textPrimary
             statusIcon.image = UIImage(systemName: "checkmark.circle.fill")
-            statusIcon.tintColor = AppTheme.primaryAccent
+            statusIcon.tintColor = AppTheme.emeraldSuccess
         } else {
             contentView.backgroundColor = AppTheme.cardBackground
             contentView.layer.borderWidth = 1
-            contentView.layer.borderColor = AppTheme.surfaceGlass.cgColor
+            contentView.layer.borderColor = AppTheme.borderGlass.cgColor
             label.textColor = AppTheme.textPrimary
             statusIcon.image = UIImage(systemName: "play.circle")
-            statusIcon.tintColor = AppTheme.textSecondary
+            statusIcon.tintColor = AppTheme.textMuted
         }
 
         if isCurrent {
-            contentView.layer.borderWidth = 2
+            contentView.backgroundColor = AppTheme.primaryAccent.withAlphaComponent(0.22)
+            contentView.layer.borderWidth = 1.5
             contentView.layer.borderColor = AppTheme.secondaryAccent.cgColor
+            statusIcon.image = UIImage(systemName: "play.fill")
+            statusIcon.tintColor = AppTheme.secondaryAccent
+            label.textColor = .white
+            AppTheme.applyGlow(to: self, color: AppTheme.primaryAccent, radius: 8, opacity: 0.5)
             accessibilityTraits.insert(.selected)
+        } else {
+            layer.shadowOpacity = 0
         }
 
         let raw = episode.title.lowercased()

@@ -243,34 +243,37 @@ class PlayerController: UIViewController {
     
     private func setupSkipUI() {
         skipButton.translatesAutoresizingMaskIntoConstraints = false
-        skipButton.backgroundColor = AppTheme.primaryAccent.withAlphaComponent(0.9)
+        skipButton.backgroundColor = AppTheme.cardBackgroundLighter.withAlphaComponent(0.90)
         skipButton.setTitleColor(.white, for: .normal)
-        skipButton.titleLabel?.font = AppTheme.Fonts.subhead(size: 15)
-        skipButton.layer.cornerRadius = 10
-        skipButton.layer.borderWidth = 1
-        skipButton.layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
-        skipButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        skipButton.titleLabel?.font = AppTheme.Fonts.subhead(size: 14)
+        skipButton.layer.cornerRadius = 22
+        skipButton.layer.borderWidth = 1.5
+        skipButton.layer.borderColor = AppTheme.primaryAccent.cgColor
+        skipButton.contentEdgeInsets = UIEdgeInsets(top: 10, left: 20, bottom: 10, right: 20)
+        skipButton.clipsToBounds = false
         skipButton.isHidden = true
         skipButton.addTarget(self, action: #selector(performSkip), for: .touchUpInside)
+        AppTheme.applyGlow(to: skipButton, color: AppTheme.primaryAccent, radius: 14, opacity: 0.65)
         view.addSubview(skipButton)
 
         skipToastLabel.translatesAutoresizingMaskIntoConstraints = false
         skipToastLabel.backgroundColor = AppTheme.cardBackground.withAlphaComponent(0.92)
         skipToastLabel.textColor = AppTheme.textPrimary
-        skipToastLabel.font = AppTheme.Fonts.subhead(size: 14)
-        skipToastLabel.layer.cornerRadius = 10
+        skipToastLabel.font = AppTheme.Fonts.subhead(size: 13)
+        skipToastLabel.layer.cornerRadius = 20
         skipToastLabel.layer.borderWidth = 1
-        skipToastLabel.layer.borderColor = AppTheme.surfaceGlass.cgColor
+        skipToastLabel.layer.borderColor = AppTheme.borderHighlight.cgColor
         skipToastLabel.clipsToBounds = true
         skipToastLabel.textAlignment = .center
         skipToastLabel.isHidden = true
+        AppTheme.applyGlow(to: skipToastLabel, color: UIColor.black, radius: 12, opacity: 0.4)
         view.addSubview(skipToastLabel)
 
         NSLayoutConstraint.activate([
             skipButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -60),
             skipButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
-            skipButton.heightAnchor.constraint(equalToConstant: 42),
-            skipButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
+            skipButton.heightAnchor.constraint(equalToConstant: 44),
+            skipButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
             
             skipToastLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             skipToastLabel.bottomAnchor.constraint(equalTo: view.centerYAnchor, constant: 120),

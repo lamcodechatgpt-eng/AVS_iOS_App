@@ -202,14 +202,19 @@ class MovieInfoViewController: UIViewController {
 
     private func styleAccentButton(_ btn: UIButton, accent: Bool = true) {
         btn.titleLabel?.font = AppTheme.Fonts.subhead(size: 15)
-        btn.backgroundColor = accent ? AppTheme.primaryAccent : AppTheme.surfaceGlass
+        btn.backgroundColor = accent ? AppTheme.primaryAccent : AppTheme.cardBackgroundLighter
         btn.setTitleColor(accent ? .white : AppTheme.textPrimary, for: .normal)
         btn.tintColor = accent ? .white : AppTheme.secondaryAccent
         btn.semanticContentAttribute = .forceLeftToRight
-        btn.layer.cornerRadius = 12
+        btn.layer.cornerRadius = 16
+        btn.layer.borderWidth = accent ? 0 : 1
+        btn.layer.borderColor = AppTheme.borderGlass.cgColor
         btn.clipsToBounds = true
         btn.contentEdgeInsets = UIEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
         btn.imageView?.contentMode = .scaleAspectFit
+        if accent {
+            AppTheme.applyGlow(to: btn, color: AppTheme.primaryAccent, radius: 10, opacity: 0.45)
+        }
     }
 
     private func bindMovie() {
@@ -225,19 +230,25 @@ class MovieInfoViewController: UIViewController {
         NetworkManager.shared.fetchMovieDetails(movieUrl: movie.link) { [weak self] details in
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                self.details = details
-                self.applyDetails()
+                guard let d = details else {
+                    self.descLabel.text = "(Không thể tải thông tin chi tiết phim)"
+                    return
+                }
+                self.populateDetails(d)
             }
         }
     }
 
-    private func applyDetails() {
-        guard let d = details else { return }
+    private func populateDetails(_ d: MovieDetails) {
         var metaParts: [String] = []
-        if !d.year.isEmpty { metaParts.append(d.year) }
         if !d.rating.isEmpty { metaParts.append("⭐ \(d.rating)") }
-        if !movie.episodeStatus.isEmpty { metaParts.append(movie.episodeStatus) }
-        metaLabel.text = metaParts.joined(separator: "  •  ")
+        if !d.year.isEmpty { metaParts.append("📅 \(d.year)") }
+        if !d.status.isEmpty { metaParts.append("🎬 \(d.status)") }
+        if !d.duration.isEmpty { metaParts.append("⏱ \(d.duration)") }
+        if metaParts.isEmpty && !movie.episodeStatus.isEmpty {
+            metaParts.append(movie.episodeStatus)
+        }
+        metaLabel.text = metaParts.joined(separator: "   •   ")
 
         descLabel.text = d.description.isEmpty ? "(Chưa có mô tả)" : d.description
         isDescriptionExpanded = false
@@ -250,15 +261,17 @@ class MovieInfoViewController: UIViewController {
             ImageLoader.shared.load(url, into: bannerImage)
         }
 
-        // Genre chips
+        // Genre chips VIP phong cách Capsule kính mờ
         genreStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for g in d.genres.prefix(8) {
             let chip = UILabel()
-            chip.text = "  \(g)  "
-            chip.font = AppTheme.Fonts.subhead(size: 12)
-            chip.textColor = AppTheme.secondaryAccent
-            chip.backgroundColor = AppTheme.secondaryAccent.withAlphaComponent(0.12)
-            chip.layer.cornerRadius = 12
+            chip.text = "   \(g)   "
+            chip.font = AppTheme.Fonts.caption(size: 12)
+            chip.textColor = AppTheme.textPrimary
+            chip.backgroundColor = AppTheme.cardBackgroundLighter
+            chip.layer.cornerRadius = 14
+            chip.layer.borderWidth = 1
+            chip.layer.borderColor = AppTheme.borderGlass.cgColor
             chip.clipsToBounds = true
             genreStack.addArrangedSubview(chip)
         }
